@@ -4,6 +4,7 @@ import { AgentPrompt } from '../../shared/types/AgentPrompt'
 import { getSystemPromptFlags } from './getSystemPromptFlags'
 import { buildIntroPromptSection } from './sections/intro-section'
 import { buildRulesPromptSection } from './sections/rules-section'
+import { buildVisualDesignSection } from './sections/visual-design-section'
 
 /**
  * Build the system prompt for the agent.
@@ -31,7 +32,14 @@ export function buildSystemPrompt(
 	const { actionTypes, partTypes } = modePart
 	const flags = getSystemPromptFlags(actionTypes, partTypes)
 
-	const lines = [buildIntroPromptSection(flags), buildRulesPromptSection(flags)]
+	const modeType = modePart.modeType
+
+	const lines = [buildIntroPromptSection(flags), buildRulesPromptSection(flags, modeType)]
+
+	// Inject visual design guidelines for lecture visualization
+	if (modeType === 'visualize') {
+		lines.push(buildVisualDesignSection())
+	}
 
 	if (withSchema) {
 		lines.push(buildSchemaPromptSection(modePart))

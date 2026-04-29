@@ -823,3 +823,261 @@ button.prompt-tag span {
 .agent-action-type-message {
 	color: var(--tl-color-text-1);
 }
+
+/* ============================================================
+   Chat panel tab bar
+   ============================================================ */
+
+.chat-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 4px 0 4px;
+	border-bottom: 1px solid var(--tl-color-low);
+	flex-shrink: 0;
+}
+
+.chat-tabs {
+	display: flex;
+	gap: 2px;
+}
+
+.chat-tab-btn {
+	appearance: none;
+	background: none;
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	font-weight: 500;
+	padding: 4px 10px;
+	color: var(--tl-color-text-2);
+	transition:
+		color 0.15s ease,
+		background-color 0.15s ease;
+}
+
+.chat-tab-btn:hover {
+	background-color: var(--tl-color-muted-2);
+	color: var(--tl-color-text);
+}
+
+.chat-tab-btn.active {
+	color: var(--tl-color-text);
+	background-color: var(--tl-color-muted-2);
+}
+
+.chat-tab-btn.has-content::after {
+	content: '';
+	display: inline-block;
+	width: 5px;
+	height: 5px;
+	background: var(--tl-color-primary);
+	border-radius: 50%;
+	margin-left: 5px;
+	vertical-align: middle;
+}
+
+.chat-header-actions {
+	display: flex;
+	gap: 2px;
+}
+
+/* ============================================================
+   Lecture tab
+   ============================================================ */
+
+.lecture-tab {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	overflow: hidden;
+	min-height: 0;
+}
+
+.lecture-tab-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	padding: 24px 16px;
+	color: var(--tl-color-text-2);
+	text-align: center;
+}
+
+.lecture-scroll {
+	flex: 1;
+	overflow-y: auto;
+	padding: 16px 16px 8px 16px;
+	scrollbar-width: thin;
+}
+
+/* Individual chunk text */
+.lecture-chunk {
+	cursor: pointer;
+	padding: 8px 0;
+	transition: opacity 0.25s ease;
+	border-radius: 4px;
+}
+
+.lecture-chunk:hover {
+	opacity: 1 !important;
+}
+
+.lecture-chunk.inactive {
+	opacity: 0.35;
+}
+
+.lecture-chunk.active {
+	opacity: 1;
+}
+
+.lecture-chunk.visualizing {
+	opacity: 0.55;
+}
+
+.lecture-chunk p {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.65;
+	color: var(--tl-color-text);
+}
+
+.lecture-chunk-placeholder {
+	color: var(--tl-color-text-2) !important;
+	font-style: italic;
+}
+
+/* Drawing-moment separator */
+.lecture-separator {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 10px 0;
+	opacity: 0.25;
+	color: var(--tl-color-text-2);
+	font-size: 12px;
+}
+
+.lecture-separator::before,
+.lecture-separator::after {
+	content: '';
+	flex: 1;
+	border-top: 1px dashed currentColor;
+}
+
+.lecture-separator-icon {
+	flex-shrink: 0;
+	font-size: 11px;
+}
+
+/* Generation progress area (phase label + action trace) */
+.lecture-progress-area {
+	flex-shrink: 0;
+	border-top: 1px solid var(--tl-color-low);
+}
+
+.lecture-progress {
+	padding: 6px 16px;
+	font-size: 11px;
+	color: var(--tl-color-text-2);
+	text-align: center;
+}
+
+/* Live action trace shown during Phase 2 */
+.lecture-trace {
+	padding: 0 16px 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.lecture-trace-item {
+	font-size: 11px;
+	color: var(--tl-color-text-3);
+	padding: 2px 6px;
+	border-left: 2px solid var(--tl-color-low);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	opacity: 0.7;
+}
+
+.lecture-trace-item:last-child {
+	opacity: 1;
+	color: var(--tl-color-text-2);
+}
+
+.lecture-generating-placeholder {
+	color: var(--tl-color-text-2);
+	font-style: italic;
+	text-align: center;
+	padding: 24px 0;
+}
+
+/* Navigation bar */
+.lecture-navigation {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 12px;
+	border-top: 1px solid var(--tl-color-low);
+	flex-shrink: 0;
+}
+
+.lecture-nav-controls {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+}
+
+.lecture-nav-btn {
+	appearance: none;
+	background: none;
+	border: 1px solid var(--tl-color-muted-2);
+	border-radius: 4px;
+	cursor: pointer;
+	padding: 3px 10px;
+	font-size: 14px;
+	color: var(--tl-color-text);
+	transition: background-color 0.15s ease;
+}
+
+.lecture-nav-btn:hover:not(:disabled) {
+	background-color: var(--tl-color-muted-2);
+}
+
+.lecture-nav-btn:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+}
+
+.lecture-nav-position {
+	font-size: 12px;
+	color: var(--tl-color-text-2);
+	min-width: 50px;
+	text-align: center;
+}
+
+.lecture-nav-file {
+	display: flex;
+	justify-content: center;
+	gap: 8px;
+}
+
+.lecture-file-btn {
+	appearance: none;
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: 11px;
+	color: var(--tl-color-text-2);
+	padding: 2px 6px;
+	border-radius: 3px;
+}
+
+.lecture-file-btn:hover {
+	color: var(--tl-color-text);
+	background-color: var(--tl-color-muted-2);
+}

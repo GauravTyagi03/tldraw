@@ -11,9 +11,11 @@ import { SelectionTag } from './SelectionTag'
 export function ChatInput({
 	handleSubmit,
 	inputRef,
+	placeholder = 'Ask, learn, brainstorm, draw',
 }: {
 	handleSubmit: FormEventHandler<HTMLFormElement>
 	inputRef: React.RefObject<HTMLTextAreaElement | null>
+	placeholder?: string
 }) {
 	const agent = useAgent()
 	const { editor } = agent
@@ -79,7 +81,7 @@ export function ChatInput({
 					ref={inputRef}
 					name="input"
 					autoComplete="off"
-					placeholder="Ask, learn, brainstorm, draw"
+					placeholder={placeholder}
 					value={inputValue}
 					onInput={(e) => setInputValue(e.currentTarget.value)}
 					onKeyDown={(e) => {

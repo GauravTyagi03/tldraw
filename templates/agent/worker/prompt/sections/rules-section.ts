@@ -2,7 +2,7 @@ import { getFocusedShapeSchemaNames } from '../../../shared/format/FocusedShape'
 import { SystemPromptFlags } from '../getSystemPromptFlags'
 import { flagged } from './flagged'
 
-export function buildRulesPromptSection(flags: SystemPromptFlags) {
+export function buildRulesPromptSection(flags: SystemPromptFlags, modeType?: string) {
 	const shapeTypeNames = getFocusedShapeSchemaNames()
 
 	return `## Shapes
@@ -239,5 +239,32 @@ ${flagged(
 - If you want to call multiple APIs and the results of the API calls don't depend on each other, you can call them all at once before ending your response. This will help you get the results of the API calls faster.
 - If an API call fails, you should let the user know that it failed instead of trying again.`
 )}
+${
+	modeType === 'outline'
+		? `
+### Lecture outline rules
+
+You are generating a lecture outline. Output 3–6 \`lecture-chunk\` actions in sequence.
+
+**For each chunk's \`text\` field (the student-facing explanation):**
+- Write in the voice of a skilled lecturer speaking naturally to a student
+- Use flowing prose only — no bullet points, no headers, no markdown formatting
+- 3–6 sentences per chunk. Conversational, clear, and forward-moving
+- All chunks together must read as one continuous script. Each chunk should naturally continue from where the previous one left off — the way a lecturer continues speaking after pausing to draw on the board
+- The pause between chunks IS the drawing moment. Write text before and after as natural pause points in a talk
+- Refer to the whiteboard visuals naturally: "as you can see here", "looking at the diagram", "what I've drawn shows", etc.
+- Never start a chunk with "In this chunk", "Now we will", or similar meta-commentary
+- Do not use bold, italics, or any markdown in the text
+
+**For each chunk's \`intent\` field (visual director notes):**
+- Write specific instructions for what shapes to draw — name exact types, positions relative to each other, text labels, colors
+- This is never shown to students; write it as precise director's notes for a visual artist
+- Later chunks should explicitly reference and extend earlier visuals rather than starting fresh
+
+**Structural rules:**
+- Chunks must build on each other — later chunks extend and connect to earlier visuals
+- The narrative should flow from foundational concept → supporting details → insight or application`
+		: ''
+}
 `
 }

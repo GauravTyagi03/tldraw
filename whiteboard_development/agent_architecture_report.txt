@@ -1,0 +1,371 @@
+TLDRAW AGENT TEMPLATE: ARCHITECTURE REPORT
+==========================================
+Date: 2026-04-16
+Source: templates/agent/
+
+
+=== 1. HOW STATE IS REPRESENTED AND HOW THE AGENT INGESTS IT ===
+
+The agent does not query the canvas directly. Instead, before every LLM call,
+the system assembles a "prompt" from up to 17 discrete "prompt parts" — each
+part encodes a different slice of canvas state into text or images. The worker
+then sorts these parts by priority and builds a message array for the model API.
+
+--- Shape serialization formats ---
+
+Shapes are never sent to the LLM in tldraw's internal format. They go through
+a conversion pipeline into one of three simplified representations:
+
+1. FocusedShape  (shared/format/FocusedShape.ts)
+   Full detail. Used for shapes the agent is directly working with, and as the
+   output format when the agent creates/updates shapes. 7 sub-types:
+
+   FocusedGeoShape:  { _type, shapeId, note, x, y, w, h, color, fill, text,
+                       textAlign }
+   FocusedTextShape: { _type:'text', shapeId, note, x, y, anchor (9 options),
+                       color, fontSize, maxWidth, text }
+   FocusedArrowShape:{ _type:'arrow', shapeId, note, x1, y1, x2, y2,
+                       fromId, toId, text, color, bend }
+   FocusedLineShape: { _type:'line', shapeId, note, points:[{x,y}], color }
+   FocusedNoteShape: { _type:'note', shapeId, note, x, y, w, color, text }
+   FocusedDrawShape: { _type:'draw', shapeId, note, x, y, w, h }
+                     (read-only; agent cannot create these via 'create' action,
+                     only via the 'pen' action)
+   FocusedUnknownShape: catch-all for unrecognized types
+
+2. BlurryShape  (client/parts/BlurryShapesPartUtil.ts)
+   Lightweight summary for every shape currently inside the agent's viewport.
+   { shapeId, type, text?, x, y, w, h }
+   All coordinates are offset (relative to the current chat's origin) and
+   rounded before being sent.
+
+3. PeripheralShapeCluster  (client/parts/PeripheralShapesPartUtil.ts)
+   Even coarser. Shapes outside the viewport are bucketed into proximity
+   clusters (padding = 75px). Each cluster reports only: numberOfShapes, bounds.
+   This gives the agent awareness that content exists elsewhere without
+   burning token budget on details it can't act on anyway.
+
+--- Prompt parts assembled per request (working mode) ---
+
+Priority order (lower number = earlier in prompt):
+
+  -100  mode              — current mode name
+   -90  debug             — debug info (dev only)
+   -80  modelName         — which model is being used
+   -70  messages          — system prompt (intro + rules sections)
+   -60  data              — continuation data from prior API calls
+   -50  contextItems      — shapes/areas the user explicitly added as context
+   -45  screenshot        — JPEG image of the agent's viewport (see section 4)
+   -40  viewportBounds    — user's viewport center + agent's viewport bounds
+   -35  blurryShapes      — list of BlurryShapes in viewport
+   -30  peripheralShapes  — clusters of shapes outside viewport
+   -25  selectedShapes    — IDs of user's currently selected shapes
+   -20  canvasLints       — lint warnings about shapes (e.g. overlapping text)
+   -15  userActionHistory — diff of shape changes since last request
+    -5  time              — current time
+  +Inf  chatHistory       — full prior conversation + current user message
+
+Source: client/modes/AgentModeDefinitions.ts, worker/prompt/buildMessages.ts
+
+--- Chat history format ---
+
+Each history entry is one of:
+  prompt:       { type:'prompt', message:string, contextItems:[...] }
+  continuation: { type:'continuation', data:[...] } (results from API calls)
+  action:       { type:'action', action:FocusedAction } (what the agent did)
+
+--- User action history ---
+
+client/parts/UserActionHistoryPartUtil.ts tracks diffs between requests:
+  added:   [ { shapeId, type } ]
+  removed: [ { shapeId, type } ]
+  updated: [ { shapeId, type, before: Partial<FocusedShape>,
+                              after:  Partial<FocusedShape> } ]
+
+--- Coordinate system ---
+
+The system prompt states (rules-section.ts):
+  "0,0 is the top-left corner. x increases rightward, y increases downward."
+  "For most shapes, x,y is the top-left corner of the bounding box."
+  "Text shapes use anchor-based positioning."
+
+All coordinates passed to the LLM are first offset relative to the chat's
+origin point, then rounded to integers. This keeps numbers small and stable
+across conversation turns.
+
+
+=== 2. WHAT TOOLS/ACTIONS THE AGENT HAS TO MODIFY STATE ===
+
+Actions are defined as Zod schemas in shared/schema/AgentActionSchemas.ts.
+Each has a corresponding ActionUtil in client/actions/ that executes it
+against the tldraw Editor. The agent streams JSON; each action is applied
+incrementally as it streams.
+
+--- Shape creation / modification ---
+
+create
+  { _type, intent, shape: FocusedShape }
+  Creates any FocusedShape type. Handles arrow bindings automatically.
+  File: client/actions/CreateActionUtil.ts
+
+update
+  { _type, intent, update: FocusedShape }
+  Partial update to an existing shape. Arrow bindings are rebuilt.
+  File: client/actions/UpdateActionUtil.ts
+
+delete
+  { _type, intent, shapeId }
+  Removes one shape.
+  File: client/actions/DeleteActionUtil.ts
+
+label
+  { _type, intent, shapeId, text }
+  Sets the text/label on a shape without touching geometry.
+  File: client/actions/LabelActionUtil.ts
+
+pen
+  { _type, intent, shapeId, points:[{x,y}], style:'smooth'|'straight',
+    color, fill, closed }
+  Freeform drawing. See section 3 for full detail.
+  File: client/actions/PenActionUtil.ts
+
+--- Spatial manipulation ---
+
+move
+  { _type, intent, shapeId, anchor (9 options), x, y }
+  Repositions one shape. 'anchor' lets the agent specify which point of the
+  bounding box x,y refers to (top-left, center, bottom-right, etc).
+  File: client/actions/MoveActionUtil.ts
+
+resize
+  { _type, intent, shapeIds:[], scaleX, scaleY, originX, originY }
+  Scales one or more shapes from an origin point.
+  File: client/actions/ResizeActionUtil.ts
+
+rotate
+  { _type, intent, shapeIds:[], degrees, originX, originY }
+  Rotates shapes around a point.
+  File: client/actions/RotateActionUtil.ts
+
+align
+  { _type, intent, shapeIds:[],
+    alignment: 'top'|'bottom'|'left'|'right'|'center-horizontal'|'center-vertical',
+    gap }
+  Aligns multiple shapes on an axis.
+  File: client/actions/AlignActionUtil.ts
+
+distribute
+  { _type, intent, shapeIds:[], direction:'horizontal'|'vertical' }
+  Distributes shapes with even spacing.
+  File: client/actions/DistributeActionUtil.ts
+
+stack
+  { _type, intent, shapeIds:[], direction:'vertical'|'horizontal', gap }
+  Stacks shapes with a fixed gap.
+  File: client/actions/StackActionUtil.ts
+
+place
+  { _type, intent, shapeId, referenceShapeId,
+    side:'top'|'bottom'|'left'|'right',
+    sideOffset, align:'start'|'center'|'end', alignOffset }
+  Places one shape relative to another (e.g. "to the right of, center-aligned").
+  File: client/actions/PlaceActionUtil.ts
+
+bringToFront / sendToBack
+  { _type, intent, shapeIds:[] }
+  Z-order operations.
+  Files: client/actions/BringToFrontActionUtil.ts, SendToBackActionUtil.ts
+
+--- Viewport / navigation ---
+
+setMyView
+  { _type, intent, x, y, w, h }
+  Changes the agent's viewport. Triggers a new screenshot on the next step.
+  File: client/actions/SetMyViewActionUtil.ts
+
+review
+  { _type, intent, x, y, w, h }
+  Schedules a follow-up request focused on a specific area (like setMyView
+  but as a deferred task).
+  File: client/actions/ReviewActionUtil.ts
+
+--- Planning / meta ---
+
+think
+  { _type, text }
+  Internal scratchpad. Text is shown in the chat panel but not as a user message.
+  File: client/actions/ThinkActionUtil.ts
+
+message
+  { _type, text }
+  Sends a visible message to the user.
+  File: client/actions/MessageActionUtil.ts
+
+update-todo-list
+  { _type, id, status:'todo'|'in-progress'|'done', text? }
+  Maintains a persistent task list in the agent's memory across turns.
+  File: client/actions/UpsertTodoListItemActionUtil.ts
+
+add-detail
+  { _type, intent }
+  Signals that more work needs to happen; triggers another agentic loop step.
+  File: client/actions/AddDetailActionUtil.ts
+
+--- Data / utility ---
+
+count
+  { _type, expression }
+  Counts shapes matching an expression. Result is fed back in next step.
+  File: client/actions/CountShapesActionUtil.ts
+
+countryInfo  (example external API)
+  { _type, code }
+  Fetches country data, schedules continuation with result.
+  File: client/actions/CountryInfoActionUtil.ts
+
+clear
+  { _type }
+  Deletes all shapes on the current page.
+  File: client/actions/ClearActionUtil.ts
+
+unknown
+  Catch-all for malformed output.
+  File: client/actions/UnknownActionUtil.ts
+
+
+=== 3. FREEFORM DRAWING (PEN ACTION) ===
+
+Yes — the agent can draw freeform strokes.
+
+File: client/actions/PenActionUtil.ts
+Schema field: shared/schema/AgentActionSchemas.ts (PenAction)
+
+Schema:
+  {
+    _type: 'pen'
+    shapeId: SimpleShapeId
+    intent: string
+    points: Array<{ x: number, y: number }>   // waypoints, not interpolated
+    style: 'smooth' | 'straight'
+    color: FocusedColor
+    fill: FocusedFill
+    closed: boolean   // whether to close the path into a filled shape
+  }
+
+How it executes:
+  1. If closed=true, the first point is duplicated at the end.
+  2. Interpolation is applied between waypoints:
+       smooth  → inserts intermediate points every 10px
+       straight → inserts intermediate points every 2px
+  3. Points are normalized: the bounding box minimum is subtracted so the
+     shape's x,y position is its top-left corner.
+  4. A 'draw' type shape is created with:
+       segments: [{ type: 'free', points: <packed array> }]
+       dash: 'draw', size: 's', isPen: true
+       isComplete: true (after streaming finishes)
+       isClosed: <from action>
+
+During streaming, the shape is created with isLocked=true and isComplete=false.
+When the action finishes, the shape is updated with the full point set.
+
+The system prompt explicitly tells the agent:
+  "If the shape you need is not available in the schema, use the pen to draw a
+   custom shape. The pen can be especially helpful when shapes need to fit
+   together precisely."
+
+IMPORTANT LIMITATION: The agent specifies waypoints as integer coordinates.
+It cannot trace arbitrary curves with precision — it approximates them. For
+a lecture-sketch use case (boxes, arrows, diagrams), this is fine. For
+detailed illustrations it would be rough.
+
+
+=== 4. SCREENSHOTS AND SPATIAL AWARENESS ===
+
+--- Screenshot delivery ---
+
+File: client/parts/ScreenshotPartUtil.ts
+
+The agent receives a JPEG screenshot of its current viewport on every request.
+
+How it's captured:
+  editor.toImage(shapeIds, {
+    type: 'jpeg',
+    bounds: agentViewportBounds,
+    padding: 0,
+    background: false
+  })
+
+If the image exceeds 8000px on its largest dimension it is scaled down.
+The result is base64-encoded and sent as an image message block to the model.
+
+In the assembled prompt it appears as:
+  "Here is the part of the canvas that you can currently see at this moment.
+   It is not a reference image."
+  [base64 image]
+
+If the viewport contains no shapes the screenshot part sends an empty string
+(no image is included).
+
+--- Spatial awareness beyond the screenshot ---
+
+The agent uses four complementary mechanisms to understand spatial layout:
+
+1. BlurryShapes list (fine detail, in-viewport)
+   JSON array of every shape in viewport with bounds and text.
+   The agent can read exact x,y,w,h of every visible shape.
+
+2. PeripheralShapeCluster list (coarse, out-of-viewport)
+   Clusters of shapes beyond the current view, with only count + bounds.
+   The agent knows shapes exist off-screen but cannot read their details
+   without first moving its viewport there.
+
+3. Viewport bounds parts
+   - User's viewport center: tells the agent where the user is looking.
+   - Agent's viewport bounds: exact pixel bounds of the screenshot.
+
+4. Selected shapes
+   IDs of what the user currently has selected. Helps the agent infer intent.
+
+--- Coordinate system details ---
+
+The system prompt defines the coordinate space clearly:
+  - Origin (0,0) is top-left of the infinite canvas (like CSS)
+  - x increases rightward, y increases downward
+  - All numbers sent to the LLM are:
+      (a) offset relative to the current chat's starting position
+      (b) rounded to integers
+  - This means shapes at 10000,8000 on the canvas might appear as 50,30 to
+    the model, keeping numbers small and reducing hallucination
+
+--- How the agent navigates spatially ---
+
+1. It reads the BlurryShapes list to know exact positions of visible shapes.
+2. It sees the screenshot to understand visual layout and overlap.
+3. It uses setMyView/review to move its viewport and get a new screenshot.
+4. It uses place/align/distribute to position shapes relative to each other
+   using relational semantics rather than absolute coordinates.
+
+
+=== SUMMARY: KEY FILES ===
+
+  State ingestion:
+    client/parts/BlurryShapesPartUtil.ts
+    client/parts/PeripheralShapesPartUtil.ts
+    client/parts/ScreenshotPartUtil.ts
+    client/parts/UserActionHistoryPartUtil.ts
+    shared/schema/PromptPartDefinitions.ts
+    worker/prompt/buildMessages.ts
+    worker/prompt/sections/intro-section.ts
+    worker/prompt/sections/rules-section.ts
+
+  Shape formats:
+    shared/format/FocusedShape.ts
+    shared/format/convertTldrawShapeToFocusedShape.ts
+
+  Actions:
+    shared/schema/AgentActionSchemas.ts
+    client/actions/  (one file per action)
+    client/modes/AgentModeDefinitions.ts
+
+  Pen/drawing:
+    client/actions/PenActionUtil.ts

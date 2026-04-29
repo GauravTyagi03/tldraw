@@ -383,3 +383,31 @@ export const UnknownAction = z
 	})
 
 export type UnknownAction = z.infer<typeof UnknownAction>
+
+// Lecture Chunk Action
+export const LectureChunkAction = z
+	.object({
+		_type: z.literal('lecture-chunk'),
+		title: z
+			.string()
+			.describe(
+				'Short label for this chunk (5–10 words). Used internally — not shown to students.'
+			),
+		text: z
+			.string()
+			.describe(
+				'The explanation text a student will read. Write in a conversational lecture voice — flowing prose, no bullet points or headers, 3–6 sentences.'
+			),
+		intent: z
+			.string()
+			.describe(
+				'Director notes for what visuals to draw for this chunk. Name shapes, positions, colors, and relationships. This is never shown to students.'
+			),
+	})
+	.meta({
+		title: 'Lecture Chunk',
+		description:
+			'Define one step of a lecture sequence. Output all chunks in order to build the complete outline. Each chunk has student-facing explanation text and visual director notes for a later drawing phase.',
+	})
+
+export type LectureChunkAction = z.infer<typeof LectureChunkAction>

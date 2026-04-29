@@ -100,8 +100,9 @@ const _AGENT_MODE_CHART: Record<AgentModeDefinition['type'], AgentModeNode> = {
 
 /**
  * Get the lifecycle node for a mode, if one exists.
+ * Returns an empty node for modes with no registered lifecycle hooks.
  * This function helps TypeScript resolve types correctly with circular imports.
  */
 export function getModeNode(mode: AgentModeType): AgentModeNode {
-	return _AGENT_MODE_CHART[mode]
+	return _AGENT_MODE_CHART[mode] ?? {}
 }

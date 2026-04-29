@@ -1,0 +1,329 @@
+TLDRAW CODEBASE OVERVIEW FOR AI SKETCH GENERATION
+===================================================
+Date: 2026-04-15
+Purpose: Building an agent that generates sketches from lecture video text input
+
+
+=== DEVELOPMENT SERVER ===
+
+The dev server runs at http://localhost:5420 via `yarn dev`.
+It serves the examples app at apps/examples/.
+There are 60+ examples in apps/examples/src/examples/ showing how to use the SDK.
+
+Key examples to read:
+  apps/examples/src/examples/editor-api/EditorApiExample.tsx  -- core API overview
+  apps/examples/src/examples/editor-api/create-arrow/CreateArrowExample.tsx  -- arrow creation
+
+
+=== HOW TO ACCESS THE EDITOR IN CODE ===
+
+Every example uses the <Tldraw> React component with an onMount callback:
+
+  import { Tldraw, Editor, createShapeId } from 'tldraw'
+
+  export default function MyExample() {
+    const handleMount = (editor: Editor) => {
+      // All editor API calls go here
+    }
+    return (
+      <div style={{ position: 'fixed', inset: 0 }}>
+        <Tldraw onMount={handleMount} />
+      </div>
+    )
+  }
+
+You can also access the editor inside child components via the useEditor() hook:
+
+  import { useEditor } from 'tldraw'
+
+  function MyComponent() {
+    const editor = useEditor()
+    // ...
+  }
+
+
+=== PROGRAMMATICALLY CREATING SHAPES ===
+
+Primary methods on the Editor class:
+  editor.createShape(shape)         -- create a single shape
+  editor.createShapes([...shapes])  -- create multiple shapes at once
+  editor.updateShape(partial)       -- update an existing shape
+  editor.deleteShape(id)            -- delete a shape
+  editor.createBinding(binding)     -- create a binding (e.g., arrow -> shape)
+
+IDs:
+  import { createShapeId } from 'tldraw'
+  const id = createShapeId()               // random id
+  const id = createShapeId('my-label')     // prefixed id
+
+-- GEO SHAPES (rectangles, ellipses, etc.) --
+
+  editor.createShape({
+    id: createShapeId(),
+    type: 'geo',
+    x: 100,
+    y: 100,
+    props: {
+      geo: 'rectangle',  // or 'ellipse', 'triangle', 'diamond', 'star', 'cloud', etc.
+      w: 200,
+      h: 120,
+      color: 'blue',     // 'red', 'green', 'blue', 'orange', 'violet', 'grey', etc.
+      fill: 'solid',     // 'none', 'semi', 'solid', 'pattern'
+      dash: 'solid',     // 'draw', 'dashed', 'dotted', 'solid'
+      size: 'm',         // 's', 'm', 'l', 'xl'
+      richText: toRichText('Label text'),
+    }
+  })
+
+  Available geo types: rectangle, ellipse, triangle, diamond, pentagon, hexagon,
+  octagon, star, rhombus-2, oval, trapezoid, arrow-right, arrow-left, arrow-up,
+  arrow-down, x-box, check-box, cloud, heart, cross
+
+-- TEXT SHAPES --
+
+  import { toRichText } from 'tldraw'
+
+  editor.createShape({
+    id: createShapeId(),
+    type: 'text',
+    x: 200,
+    y: 200,
+    props: {
+      richText: toRichText('Hello world'),
+      color: 'black',
+      size: 'm',         // 's', 'm', 'l', 'xl'
+      font: 'draw',      // 'draw', 'sans', 'serif', 'mono'
+      textAlign: 'middle', // 'start', 'middle', 'end'
+      autoSize: true,
+    }
+  })
+
+-- ARROW SHAPES --
+
+  const startId = createShapeId()
+  const endId = createShapeId()
+  const arrowId = createShapeId()
+
+  // First create the shapes to connect
+  editor.createShapes([
+    { id: startId, type: 'geo', x: 100, y: 100, props: { geo: 'rectangle', w: 100, h: 60 } },
+    { id: endId,   type: 'geo', x: 400, y: 100, props: { geo: 'rectangle', w: 100, h: 60 } },
+  ])
+
+  // Create the arrow
+  editor.createShape({
+    id: arrowId,
+    type: 'arrow',
+    x: 150,
+    y: 130,
+    props: {
+      start: { x: 0, y: 0 },
+      end: { x: 250, y: 0 },
+      arrowheadEnd: 'arrow',    // 'arrow', 'triangle', 'square', 'dot', 'none', etc.
+      arrowheadStart: 'none',
+      color: 'black',
+      size: 'm',
+    }
+  })
+
+  // Bind the arrow to the shapes (optional but makes arrow stick to shapes)
+  editor.createBindings([
+    {
+      fromId: arrowId,
+      toId: startId,
+      type: 'arrow',
+      props: { terminal: 'start', normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false },
+    },
+    {
+      fromId: arrowId,
+      toId: endId,
+      type: 'arrow',
+      props: { terminal: 'end', normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false },
+    },
+  ])
+
+-- LINE SHAPES (multi-point polylines) --
+
+  editor.createShape({
+    id: createShapeId(),
+    type: 'line',
+    x: 0,
+    y: 0,
+    props: {
+      spline: 'line',   // 'line' (straight segments) or 'cubic' (smooth curve)
+      color: 'black',
+      size: 'm',
+      dash: 'solid',
+      points: {
+        a1: { id: 'a1', index: 'a1', x: 0,   y: 0   },
+        a2: { id: 'a2', index: 'a2', x: 100, y: 50  },
+        a3: { id: 'a3', index: 'a3', x: 200, y: 0   },
+      }
+    }
+  })
+
+-- NOTE / STICKY NOTE SHAPES --
+
+  editor.createShape({
+    id: createShapeId(),
+    type: 'note',
+    x: 300,
+    y: 200,
+    props: {
+      richText: toRichText('Sticky note content'),
+      color: 'yellow',   // 'grey', 'light-violet', 'violet', 'blue', 'light-blue',
+                         // 'yellow', 'orange', 'green', 'light-green', 'light-red', 'red'
+      size: 'm',
+      font: 'draw',
+    }
+  })
+
+-- FRAME SHAPES (containers/groups) --
+
+  editor.createShape({
+    id: createShapeId(),
+    type: 'frame',
+    x: 50,
+    y: 50,
+    props: {
+      w: 600,
+      h: 400,
+      name: 'My Frame',
+    }
+  })
+
+
+=== SHAPE DATA STRUCTURE ===
+
+All shapes share a base structure:
+
+  {
+    id: TLShapeId,         // unique id string
+    type: string,          // 'geo', 'text', 'arrow', 'line', 'note', 'frame', etc.
+    typeName: 'shape',
+    parentId: TLParentId,  // parent shape id or page id
+    index: IndexKey,       // fractional ordering key (for z-order)
+    x: number,             // x position in parent space
+    y: number,             // y position in parent space
+    rotation: number,      // rotation in radians
+    isLocked: boolean,
+    opacity: number,       // 0.0 to 1.0
+    props: { ... },        // shape-type-specific properties
+    meta: { ... },         // arbitrary custom metadata
+  }
+
+Coordinate system:
+  - x/y are in parent space (relative to parent shape, or to page if no parent)
+  - The page origin is (0, 0); canvas extends infinitely in all directions
+  - editor.getShapePageBounds(id) returns bounds in absolute page coordinates
+  - editor.getShapePageTransform(id) returns the full page-space transform
+
+
+=== EXISTING AI TOOLING IN THE REPO ===
+
+There is a full AI agent template already built into the repo:
+
+  templates/agent/            -- Complete AI agent system (recommended starting point)
+  templates/chat/             -- Canvas annotation with chat
+  templates/branching-chat/   -- Visual conversation trees
+  templates/workflow/         -- Node-based visual programming with AI ops
+  templates/image-pipeline/   -- AI image generation pipeline (Replicate)
+
+The agent template supports:
+  - Anthropic Claude (recommended), OpenAI GPT, Google models
+  - Reading the canvas: screenshot + structured shape data sent to LLM
+  - Writing to the canvas: 25+ action types (create, update, delete, move, resize, rotate, align, label, etc.)
+  - Agentic loop (multi-step reasoning)
+
+Key files in templates/agent/:
+  templates/agent/client/      -- React UI, agent logic
+  templates/agent/worker/      -- Cloudflare Worker (handles LLM API calls)
+  templates/agent/shared/      -- Types and action schemas
+
+The agent accepts prompts like:
+  agent.prompt('Draw a flowchart showing user authentication')
+
+Documentation:
+  apps/docs/content/docs/ai.mdx        -- AI integration guide
+  apps/docs/content/docs/llm-docs.mdx  -- LLM-optimized format
+
+
+=== RECOMMENDED APPROACH FOR LECTURE SKETCH GENERATION ===
+
+Option A: Use the agent template as a base
+  1. Copy templates/agent/ as your starting point
+  2. Add a text input component that takes lecture transcript chunks
+  3. Send the transcript to the agent with a prompt like:
+     "Based on this lecture content, draw a diagram illustrating the key concepts: <text>"
+  4. The agent's built-in action system will handle placing shapes on the canvas
+
+Option B: Write a direct editor API integration (simpler, more deterministic)
+  1. Create a new example in apps/examples/src/examples/
+  2. Use the <Tldraw onMount={...}> pattern
+  3. Call an LLM (Claude, GPT, etc.) with the lecture text, ask it to return
+     a JSON list of shapes to create
+  4. Parse the JSON and call editor.createShapes([...]) directly
+  This is more predictable but requires designing the LLM output schema yourself.
+
+Option C: Use the existing agent but add a transcript sidebar
+  1. Run the agent template dev server
+  2. Add a sidebar that accepts lecture text
+  3. Pass the text as context to agent.prompt() calls
+
+The agent template at templates/agent/ is the most mature option and already
+handles the hard parts (LLM tool calls, canvas context, streaming actions).
+
+
+=== USEFUL EDITOR API METHODS ===
+
+Navigation:
+  editor.zoomToFit()                    -- fit all shapes in view
+  editor.zoomIn() / editor.zoomOut()
+  editor.setCamera({ x, y, z })        -- set camera position (x, y) and zoom (z)
+  editor.centerOnPoint({ x, y })
+
+Querying:
+  editor.getCurrentPageShapes()         -- all shapes on current page
+  editor.getShape(id)                   -- get a specific shape
+  editor.getSelectedShapes()            -- currently selected shapes
+  editor.getShapePageBounds(id)         -- absolute bounding box
+
+Undo/Redo:
+  editor.undo()
+  editor.redo()
+  editor.mark('label')                 -- create an undo checkpoint
+  editor.bailToMark('label')           -- undo back to checkpoint
+
+Batching (for performance):
+  editor.batch(() => {
+    editor.createShapes([...many shapes...])
+  })
+
+Export:
+  editor.getSvgElement([...shapeIds])  -- export shapes as SVG
+  editor.toImage([...shapeIds], { type: 'png' })  -- export as image
+
+Canvas state snapshot:
+  const snapshot = editor.store.getSnapshot()
+  editor.store.loadSnapshot(snapshot)
+
+
+=== KEY SOURCE FILES ===
+
+  packages/editor/src/lib/editor/Editor.ts   -- Main Editor class (all API methods)
+  packages/tlschema/src/shapes/              -- Shape type definitions
+  packages/tldraw/src/index.ts               -- Public SDK exports
+  apps/examples/src/examples/               -- Example code
+  templates/agent/                          -- AI agent template
+  apps/docs/content/docs/ai.mdx             -- AI docs
+
+
+=== GETTING STARTED QUICKLY ===
+
+1. Dev server is at http://localhost:5420 (run `yarn dev` from repo root)
+2. Browse to see available examples
+3. To add your own example:
+   a. Create apps/examples/src/examples/my-feature/MyFeatureExample.tsx
+   b. Register it in apps/examples/src/examples/examples.ts
+4. For AI agent work, look at templates/agent/ -- it can be run standalone
+   with `yarn dev-template agent` from the repo root

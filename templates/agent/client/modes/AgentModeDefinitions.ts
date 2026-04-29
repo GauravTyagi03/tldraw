@@ -11,6 +11,7 @@ import { CreateActionUtil } from '../actions/CreateActionUtil'
 import { DeleteActionUtil } from '../actions/DeleteActionUtil'
 import { DistributeActionUtil } from '../actions/DistributeActionUtil'
 import { LabelActionUtil } from '../actions/LabelActionUtil'
+import { LectureChunkActionUtil } from '../actions/LectureChunkActionUtil'
 import { MessageActionUtil } from '../actions/MessageActionUtil'
 import { MoveActionUtil } from '../actions/MoveActionUtil'
 import { PenActionUtil } from '../actions/PenActionUtil'
@@ -31,6 +32,7 @@ import { BlurryShapesPartUtil } from '../parts/BlurryShapesPartUtil'
 import { CanvasLintsPartUtil } from '../parts/CanvasLintsPartUtil'
 import { ChatHistoryPartUtil } from '../parts/ChatHistoryPartUtil'
 import { ContextItemsPartUtil } from '../parts/ContextItemsPartUtil'
+import { CurrentChunkPartUtil } from '../parts/CurrentChunkPartUtil'
 import { DataPartUtil } from '../parts/DataPartUtil'
 import { DebugPartUtil } from '../parts/DebugPartUtil'
 import { MessagesPartUtil } from '../parts/MessagesPartUtil'
@@ -167,6 +169,66 @@ export const AGENT_MODE_DEFINITIONS = [
 			CountShapesActionUtil.type,
 
 			// Internal (required)
+			UnknownActionUtil.type,
+		],
+	},
+	{
+		// Outline mode: used in Phase 1 of lecture generation.
+		// LLM outputs only lecture-chunk actions; no canvas changes happen.
+		type: 'outline',
+		active: true,
+		parts: [
+			ModePartUtil.type,
+			ModelNamePartUtil.type,
+			MessagesPartUtil.type,
+			ScreenshotPartUtil.type,
+			BlurryShapesPartUtil.type,
+			ChatHistoryPartUtil.type,
+			TimePartUtil.type,
+		],
+		actions: [
+			LectureChunkActionUtil.type,
+			ThinkActionUtil.type,
+			MessageActionUtil.type,
+			UnknownActionUtil.type,
+		],
+	},
+	{
+		// Visualize mode: used in Phase 2 of lecture generation.
+		// LLM generates canvas shapes for a specific chunk, seeing the current canvas state.
+		type: 'visualize',
+		active: true,
+		parts: [
+			ModePartUtil.type,
+			ModelNamePartUtil.type,
+			MessagesPartUtil.type,
+			CurrentChunkPartUtil.type,
+			ScreenshotPartUtil.type,
+			UserViewportBoundsPartUtil.type,
+			AgentViewportBoundsPartUtil.type,
+			BlurryShapesPartUtil.type,
+			PeripheralShapesPartUtil.type,
+			ChatHistoryPartUtil.type,
+			CanvasLintsPartUtil.type,
+			TimePartUtil.type,
+		],
+		actions: [
+			CreateActionUtil.type,
+			UpdateActionUtil.type,
+			DeleteActionUtil.type,
+			LabelActionUtil.type,
+			MoveActionUtil.type,
+			PlaceActionUtil.type,
+			BringToFrontActionUtil.type,
+			SendToBackActionUtil.type,
+			RotateActionUtil.type,
+			ResizeActionUtil.type,
+			AlignActionUtil.type,
+			DistributeActionUtil.type,
+			StackActionUtil.type,
+			PenActionUtil.type,
+			ThinkActionUtil.type,
+			SetMyViewActionUtil.type,
 			UnknownActionUtil.type,
 		],
 	},

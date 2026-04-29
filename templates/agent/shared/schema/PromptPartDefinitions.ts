@@ -120,6 +120,17 @@ export interface DebugPart {
 	logMessages: boolean
 }
 
+export interface CurrentChunkPart {
+	type: 'current-chunk'
+	chunkIndex: number
+	totalChunks: number
+	title: string
+	text: string
+	intent: string
+	/** Combined text from all prior chunks for narrative context */
+	previousChunksContext: string
+}
+
 // ============================================================================
 // Prompt Part Definitions
 // ============================================================================
@@ -149,6 +160,8 @@ export const CanvasLintsPartDefinition: PromptPartDefinition<CanvasLintsPart> = 
 		const growYLints = lints.filter((l) => l.type === 'growY-on-shape')
 		const overlappingTextLints = lints.filter((l) => l.type === 'overlapping-text')
 		const friendlessArrowLints = lints.filter((l) => l.type === 'friendless-arrow')
+		const nearlyAlignedLints = lints.filter((l) => l.type === 'nearly-aligned')
+		const inconsistentSizingLints = lints.filter((l) => l.type === 'inconsistent-sizing')
 
 		messages.push(
 			"[LINTER]: The following potential visual problems have been detected in the canvas. You should decide if you want to address them. Defer to your view of the canvas to decide if you need to make changes; it's very possible that you don't need to make any changes."
@@ -176,6 +189,22 @@ export const CanvasLintsPartDefinition: PromptPartDefinition<CanvasLintsPart> = 
 			const lines = [
 				"Unconnected arrows: These arrows aren't fully connected to other shapes.",
 				...shapeIds.map((id) => `  - ${id}`),
+			]
+			messages.push(lines.join('\n'))
+		}
+
+		if (nearlyAlignedLints.length > 0) {
+			const lines = [
+				'Near-misalignment: These pairs of shapes are almost — but not exactly — aligned on a shared edge or centre axis (within 8 px). This is likely unintentional. Use the align action to make them perfectly aligned.',
+				...nearlyAlignedLints.map((lint) => `  - ${lint.shapeIds.join(', ')}`),
+			]
+			messages.push(lines.join('\n'))
+		}
+
+		if (inconsistentSizingLints.length > 0) {
+			const lines = [
+				'Inconsistent sizing: These pairs of shapes are nearly — but not exactly — the same size (width and height each within 15 px). They are probably meant to be identical in size. Use the resize action to normalise them.',
+				...inconsistentSizingLints.map((lint) => `  - ${lint.shapeIds.join(', ')}`),
 			]
 			messages.push(lines.join('\n'))
 		}
@@ -524,4 +553,27 @@ export const ModePartDefinition: PromptPartDefinition<ModePart> = {
 export const DebugPartDefinition: PromptPartDefinition<DebugPart> = {
 	type: 'debug',
 	// No buildContent - this is metadata for the worker, not prompt content for the model
+}
+
+// CurrentChunk - provides context about the chunk being visualized in 'visualize' mode
+export const CurrentChunkPartDefinition: PromptPartDefinition<CurrentChunkPart> = {
+	type: 'current-chunk',
+	priority: -88, // early in prompt, before screenshot/shapes
+	buildContent({ chunkIndex, totalChunks, title, text, intent, previousChunksContext }) {
+		const lines: string[] = [
+			`You are generating visuals for chunk ${chunkIndex + 1} of ${totalChunks} in a lecture sequence.`,
+			`Chunk title (internal only): "${title}"`,
+			`Chunk explanation text:\n${text}`,
+			`Visual intent for this chunk:\n${intent}`,
+		]
+		if (previousChunksContext) {
+			lines.push(`Context from previous chunks (for continuity):\n${previousChunksContext}`)
+		} else {
+			lines.push('This is the first chunk — the canvas is blank before you start drawing.')
+		}
+		lines.push(
+			'IMPORTANT: Only add visuals for this specific chunk. Do not recreate or move shapes from previous chunks. Build on top of what already exists on the canvas.'
+		)
+		return lines
+	},
 }

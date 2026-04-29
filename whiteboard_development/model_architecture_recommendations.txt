@@ -1,0 +1,406 @@
+MODEL ARCHITECTURE AND FINE-TUNING RECOMMENDATIONS
+Stanford Whiteboard Agent — April 2026
+=======================================================
+
+
+PART 1: HOW THE CURRENT SYSTEM WORKS (AND WHY IT MATTERS FOR MODEL SELECTION)
+-------------------------------------------------------------------------------
+
+Understanding the agent's actual information diet is the prerequisite for choosing
+what to fine-tune or replace.
+
+At each inference call the model receives:
+
+  A. A screenshot of the current canvas viewport (base64 PNG)
+  B. Structured text descriptions of shapes in view, grouped by proximity:
+       - "blurry shapes": shapes in the viewport, described with type/position/label
+       - "peripheral shapes": shapes just outside the viewport
+       - "selected shapes": shapes the user has highlighted
+  C. The current mode (working / outline / visualize)
+  D. A system prompt encoding:
+       - The action schema (what JSON the model is allowed to emit)
+       - Visual design rules (color conventions, typography, layout principles)
+       - Mode-specific instructions (e.g., lecture-script tone for outline mode)
+  E. Chat history (prior user prompts and agent actions)
+  F. In visualize mode: the current chunk's text, intent, and a summary of prior chunks
+
+The model responds with a stream of JSON objects, each conforming to one of ~20
+action types: create, update, delete, move, align, distribute, resize, pen, label,
+think, message, lecture-chunk, etc.
+
+CRITICAL OBSERVATION: This is not an image-generation problem.
+The output is a symbolic program — a sequence of discrete, parameterized actions
+that an execution engine applies to a shared document store. The canvas visuals are
+a *side effect* of running those actions. Diffusion models, which output pixel
+arrays directly, are categorically wrong for this task.
+
+What the model must actually do:
+
+  1. PARSE: Read a screenshot and extract spatial meaning — where shapes are, what
+     they say, how they relate visually. This is a vision task.
+
+  2. PLAN: Decide what to draw and in what order — which shapes, where, how large,
+     what colors. For lectures this requires multi-step pedagogical reasoning (what
+     does the student need to understand first?).
+
+  3. CODE-GEN: Emit structured JSON with exact coordinates, colors, font sizes,
+     binding IDs. This is closer to program synthesis than image generation.
+
+  4. REFERENCE: Use shape IDs from the structured text (part B above) to reference
+     existing objects in update/move/align actions. This requires grounding tokens
+     from the image to tokens from the text description.
+
+  5. SELF-CORRECT: After running lints, read the lint output and issue corrective
+     actions (resize, realign, reconnect arrows). This is a tool-use loop.
+
+The dual-modality input (screenshot + structured text) is intentional and
+complementary — not redundant. The screenshot gives holistic spatial context that
+text alone cannot encode efficiently. The structured text gives exact coordinates,
+IDs, and properties that the screenshot cannot reliably communicate at the token
+level. A replacement architecture needs both channels.
+
+
+PART 2: ARCHITECTURE RECOMMENDATIONS
+--------------------------------------
+
+2.1  WHAT WE ARE LOOKING FOR
+
+Required properties:
+  - Native image + text input (true multimodal, not image-captioning bolted on)
+  - Strong structured-output reliability (JSON with precise numeric fields)
+  - Spatial reasoning: understanding position, proximity, overlap from images
+  - Long context: chat history + system prompt + screenshot can exceed 8k tokens
+  - Significant general reasoning (pedagogical planning, self-correction)
+  - Open weights or fine-tuning API access
+
+Nice to have:
+  - Efficient inference at the scale of a single-user tool (< 70B parameters
+    handles one user fine; needs thought if serving many concurrent users)
+  - Support for LoRA / QLoRA fine-tuning on consumer or cloud GPU clusters
+
+
+2.2  RECOMMENDED ARCHITECTURES
+
+--- TIER 1: BEST FIT ---
+
+QWEN2-VL (7B / 72B, Alibaba)
+  - Designed specifically for spatial understanding from images. Uses a dynamic
+    resolution visual encoder that can handle high-resolution canvas screenshots
+    without aggressive downsampling — important for reading small shape labels.
+  - Qwen2-VL introduced "Multimodal Rotary Position Embedding" (M-RoPE) which
+    encodes temporal and spatial position jointly; this helps with the grid-like
+    structure of whiteboard layouts.
+  - Excellent JSON generation. Strong instruction following.
+  - 7B variant is practical for a single researcher's fine-tuning run on 2x A100s.
+  - 72B variant is competitive with frontier models on visual reasoning benchmarks.
+  - Recommended as primary target for fine-tuning experiments.
+
+INTERN-VL 2.5 / 3 (8B / 38B / 76B, Shanghai AI Lab)
+  - Consistent top performance on document and diagram understanding benchmarks
+    (DocVQA, ChartQA, OCRBench). Whiteboard content is structurally similar to
+    these tasks.
+  - Uses a strong ViT encoder (InternViT-6B) that is separately trainable.
+  - Strong JSON / function-call following. Used in production tool-use pipelines.
+  - The 8B variant is very accessible for fine-tuning.
+  - Worth running as a comparison baseline against Qwen2-VL.
+
+--- TIER 2: CAPABLE, SOME TRADE-OFFS ---
+
+LLAMA-3.2-VISION (11B / 90B, Meta)
+  - Good general reasoning and instruction following inherited from Llama-3.
+  - Vision adapter is well-integrated and supports high-resolution inputs.
+  - Trade-off: spatial reasoning on complex layouts is weaker than Qwen2-VL in
+    published benchmarks. May require more fine-tuning data to compensate.
+  - Strong ecosystem: Axolotl, LLaMA-Factory, and HuggingFace PEFT all support it
+    well, which reduces fine-tuning engineering overhead.
+
+PIXTRAL 12B (Mistral AI)
+  - Mistral's native vision model. No image resolution limit — the vision encoder
+    accepts variable-resolution input natively, useful for large canvas regions.
+  - Excellent at structured output and function calling (inherited from Mistral).
+  - Smaller community than LLaMA; less fine-tuning tooling.
+
+GEMMA-3 (4B / 12B / 27B, Google DeepMind)
+  - Recent release (March 2025). The 27B variant is competitive with much larger
+    models on reasoning tasks.
+  - Vision capability is strong but the architecture is newer — less fine-tuning
+    know-how available.
+
+--- TIER 3: INTERESTING BUT NOT THE RIGHT FIT HERE ---
+
+PHI-3.5-VISION (4B, Microsoft)
+  - Efficient, good at visual QA. But 4B may not have enough capacity for the
+    planning and multi-step reasoning the lecture system requires.
+  - Worth testing as a cheap inference alternative if a much larger model is used
+    for offline data generation.
+
+PURE LLM (no vision, e.g., Mistral or Qwen-2.5 text-only)
+  - Could work if you lean entirely on the structured shape descriptions (part B)
+    and drop screenshots. The shape descriptions are rich enough for many actions.
+  - Loses holistic spatial understanding — the model cannot see overlap, visual
+    balance, or aesthetic quality. The self-correction loop would be significantly
+    degraded without the screenshot.
+  - Only consider this if GPU / cost constraints make VLMs impractical.
+
+
+2.3  ARCHITECTURE TO AVOID
+
+DIFFUSION MODELS (Stable Diffusion, FLUX, DALL-E, etc.)
+  - Cannot produce the symbolic JSON output the execution engine expects.
+  - Cannot reference existing shape IDs or compose incrementally.
+  - Cannot self-correct through lint feedback.
+  - Categorically wrong for this problem class. Do not explore.
+
+ENCODER-ONLY MODELS (CLIP, BLIP encoder, ViT classifiers)
+  - Useful as a perception component but not as the full agent. Could potentially
+    be used as a specialized canvas-understanding module feeding into a smaller LLM,
+    but this adds significant architectural complexity for uncertain gain over a
+    well-tuned VLM.
+
+
+PART 3: FINE-TUNING APPROACH
+------------------------------
+
+3.1  WHAT WE HAVE (AND DON'T HAVE)
+
+The current system produces a natural data exhaust:
+
+  DATA AVAILABLE NOW (from existing agent runs):
+  - System prompt (action schema, design rules, mode instructions) — fixed across runs
+  - Screenshot at time of inference — logged if you capture HTTP requests
+  - Structured shape descriptions — logged alongside screenshot
+  - Chat history leading up to each inference call
+  - Action sequence the model emitted — logged via the SSE stream
+  - Resulting diff applied to the store — logged in AgentActionManager
+
+  MISSING:
+  - Ground-truth quality labels: we don't know which action sequences produced good
+    visuals vs. bad ones
+  - Diversity: production data will be clustered around topics the user actually
+    asked about
+
+3.2  DATA COLLECTION STRATEGY
+
+Phase 0 — Synthetic generation pipeline (can start immediately):
+  Use Claude (the current production model) to generate N lecture sequences on a
+  broad set of topics spanning STEM, humanities, and professional domains.
+
+  For each topic, run the full generateLecture() pipeline and capture:
+    - The full prompt sent at each inference call (screenshot + text)
+    - The action sequence produced
+    - The resulting canvas state (store snapshot)
+
+  This gives you roughly 5 × N training examples per lecture (one per chunk + the
+  two review passes), all of which are (prompt → action_sequence) pairs ready for
+  supervised fine-tuning.
+
+  Target: 500–2000 lectures = 2500–10000 training examples. Achievable via
+  programmatic generation over a weekend with a standard API budget.
+
+  Filter: drop examples where the lint checker fires repeatedly (sign of poor
+  quality output) or where the model fell back to UnknownAction.
+
+Phase 1 — Quality filtering (before fine-tuning):
+  For each collected example, score visual quality using a judge model or heuristic:
+    - Lint pass rate (fraction of examples with 0 lints after the correction pass)
+    - Shape count plausibility (too few = incomplete, too many = cluttered)
+    - Layout balance score (rough centroid and bounding-box symmetry heuristics)
+
+  Keep only the top 50–70% of examples by quality score. Fine-tuning on bad
+  examples hurts more than having fewer examples.
+
+Phase 2 — Human curation (optional, high ROI):
+  If you can spend 20–40 hours of human annotation time, have annotators:
+    - Rank pairs of action sequences by visual outcome quality
+    - Flag sequences that violate the visual design rules
+  This creates a preference dataset for DPO (see 3.4 below).
+
+Phase 3 — Domain-specific augmentation:
+  For the specific use case (educational whiteboard diagrams), generate examples
+  specifically covering:
+    - Mathematical diagrams (graphs, number lines, matrices, proofs)
+    - Process flows (arrows, stages, feedback loops)
+    - Concept maps (hierarchical and network topologies)
+    - Code/system architecture diagrams
+    - Biological/chemical diagrams
+  These are underrepresented in general fine-tuning data but high-value for an
+  educational tool.
+
+3.3  SUPERVISED FINE-TUNING (SFT) — THE BASELINE
+
+Format:
+  Each training example is a single conversation turn:
+
+    SYSTEM: [full system prompt with action schema and design rules]
+    USER:   [mode part] [shape descriptions] [chat history] [screenshot] [request]
+    ASST:   [action_1_json]\n[action_2_json]\n...[action_N_json]
+
+  The loss is computed only on the ASST tokens (standard instruction-tuning).
+
+Recommended approach — QLoRA (Quantized LoRA):
+  - Quantize the base VLM to 4-bit (NF4) using bitsandbytes
+  - Apply LoRA adapters to: q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj,
+    down_proj (all linear layers in the LLM backbone)
+  - Keep the vision encoder frozen initially; fine-tune it in a second pass if
+    the model still struggles with spatial reasoning
+  - r=64, alpha=128 is a good starting point; r=16 if GPU memory is constrained
+
+Hardware:
+  - Qwen2-VL 7B with QLoRA: 1x A100 80GB or 2x A100 40GB with gradient checkpointing
+  - Qwen2-VL 72B with QLoRA: 4–8x A100 80GB (or H100s)
+  - InternVL 8B with QLoRA: 1x A100 40GB
+  - Use DeepSpeed ZeRO Stage 2 or 3 for multi-GPU runs
+
+Tooling:
+  - LLaMA-Factory (https://github.com/hiyouga/LLaMA-Factory) supports all Tier 1
+    and 2 models with a config-driven fine-tuning interface. Lowest overhead.
+  - Axolotl (https://github.com/OpenAccess-AI-Collective/axolotl) is flexible and
+    battle-tested for VLM fine-tuning.
+  - HuggingFace TRL + PEFT if you want more programmatic control.
+
+Hyperparameters (starting point):
+  - Learning rate: 1e-4 with cosine schedule, 3% warmup
+  - Batch size: effective 64–128 (use gradient accumulation)
+  - Epochs: 2–3 (VLMs overfit quickly on small datasets)
+  - Max sequence length: 8192 tokens (covers most examples with moderate history)
+
+3.4  PREFERENCE OPTIMIZATION (DPO) — GOING BEYOND SFT
+
+Once you have an SFT checkpoint, preference optimization can improve visual quality
+by teaching the model to prefer action sequences with better outcomes.
+
+DPO (Direct Preference Optimization) setup:
+  - Generate 2–5 action sequences for the same prompt using the SFT model (with
+    temperature 0.7–1.0)
+  - Render each sequence on the canvas and score by:
+      a) Lint pass rate (programmatic)
+      b) Visual layout score (symmetry heuristic or GPT-4o judge)
+      c) Human preference (if available)
+  - Create (chosen, rejected) pairs from the ranked outputs
+  - Run DPO with beta=0.1 for 1 epoch
+
+This loop can be repeated 2–3 times (iterative DPO or "online DPO") and typically
+produces meaningful visual quality improvements over SFT alone.
+
+RLAIF alternative:
+  If human labeling is not available, use a VLM judge (GPT-4o or a larger Qwen2-VL)
+  to rank pairs of generated canvas screenshots. Prompt the judge with the visual
+  design principles from visual-design-section.ts as the evaluation rubric.
+
+3.5  WHAT NOT TO FINE-TUNE
+
+DO NOT fine-tune on:
+  - The system prompt content itself (action schema, design rules). These change as
+    the product evolves. They should remain in-context, not baked into weights.
+  - The lecture text generation (outline phase). This is better handled by
+    instruction following from the base model + good prompt engineering in
+    rules-section.ts. Fine-tuning on lecture text has high risk of catastrophic
+    forgetting of general writing ability.
+
+FINE-TUNE on:
+  - The canvas action generation (visualize phase) — this is the highest-value
+    target. The base model has no prior exposure to tldraw's action schema or
+    coordinate system conventions.
+  - The self-correction behavior: learning to read lint output and issue precise
+    corrective actions (align, resize) is a narrow skill that benefits from examples.
+
+
+PART 4: SYSTEM-LEVEL CONSIDERATIONS
+--------------------------------------
+
+4.1  THE SCREENSHOT + TEXT REDUNDANCY IS LOAD-BEARING
+
+The system passes both a screenshot and structured text for the same canvas state.
+This feels redundant but serves distinct roles that a fine-tuned model should
+preserve:
+
+  Screenshot → holistic spatial understanding, visual quality assessment, what
+               the overall composition looks like
+
+  Structured text → exact coordinates, shape IDs for referencing, font sizes,
+                    colors as discrete values, ordering metadata
+
+A model that is shown only screenshots will struggle to reliably produce correct
+shape IDs and coordinates. A model shown only text will struggle to assess visual
+balance and detect overlapping or misaligned elements. Keep both.
+
+If you find the screenshot is not adding value after fine-tuning (measure by
+ablation: does removing screenshots reduce action quality?), you can drop it to
+reduce inference cost — but verify this empirically.
+
+4.2  CONTEXT LENGTH AND LECTURE GENERATION
+
+In the lecture visualize mode, the model receives:
+  - System prompt: ~2000 tokens
+  - Full chat history (can grow to 4000+ tokens for long sessions)
+  - Screenshot: ~1000–2000 tokens depending on resolution
+  - Shape descriptions: 500–2000 tokens depending on canvas density
+  - Current chunk + prior chunks context: 500–1500 tokens
+
+Total: easily 8000–10000 tokens per call. A 7B model with 8192 context limit will
+truncate. Use a model that supports at least 16k context natively, or implement
+context compression (summarize older chat history before it gets trimmed).
+
+Qwen2-VL supports 32k context natively. InternVL 2.5 supports 8k by default but
+can be extended. Llama-3.2 supports 128k.
+
+4.3  INFERENCE LATENCY
+
+The current system streams actions token-by-token (SSE). A 7B model at 4-bit
+on an A100 produces ~40–80 tokens/second. Each action is typically 50–200 tokens
+of JSON. A lecture chunk visualization typically emits 5–15 actions.
+
+Expected latency per chunk (7B, local or cloud GPU):
+  - Action streaming: ~5–20 seconds
+  - Plus correction pass if lints fire: +5–15 seconds
+
+This is acceptable for a research tool. If it is too slow, look at:
+  - Speculative decoding (draft-target model pair)
+  - Batching multiple actions into a single JSON array output
+  - Using a smaller model for cheap actions (label, align) and larger for plan/create
+
+4.4  MULTI-AGENT SEPARATION
+
+The system has a natural two-model split already in the code:
+  - Phase 1 (outline): Needs language understanding, pedagogical structure,
+    writing quality. Vision is largely irrelevant.
+  - Phase 2 (visualize): Needs vision + spatial reasoning + action generation.
+
+A possible specialized architecture:
+  - Phase 1: Fine-tuned text-only LLM (e.g., Qwen-2.5 7B or Mistral 7B) optimized
+    for lecture script generation. Cheap, fast, high quality for text.
+  - Phase 2: Fine-tuned VLM (Qwen2-VL 7B) optimized for canvas action generation.
+  - Correction passes: Can reuse the Phase 2 model.
+
+This splits the fine-tuning problem into two cleaner subproblems and allows
+independent iteration on each.
+
+
+PART 5: RECOMMENDED STARTING POINT
+------------------------------------
+
+Given the constraints (research tool, small team, need for strong reasoning):
+
+Step 1 — Immediate: Build the data pipeline.
+  Run generateLecture() on 200–500 diverse topics, capture all inference calls
+  (prompt + response). This requires zero training; just instrumentation.
+  Target: 1000–2500 (prompt → action_sequence) training pairs.
+
+Step 2 — Two weeks: QLoRA fine-tune Qwen2-VL-7B on collected data.
+  Use LLaMA-Factory with a config file. One A100 80GB for ~12–24 hours.
+  Evaluate by running the full lecture pipeline and scoring lint pass rates and
+  visual quality (eyeball + heuristic score).
+
+Step 3 — Iterate: Compare against InternVL 8B on the same data.
+  Determine which base model produces better spatial layouts and JSON reliability.
+
+Step 4 — If quality is sufficient: Run one round of DPO.
+  Generate 3 completions per prompt, rank by lint score, run DPO for 1 epoch.
+  Evaluate improvement.
+
+Step 5 — Scale: If the 7B model is good, try the 72B variant for ceiling analysis.
+  This tells you how much headroom exists before hitting diminishing returns.
+
+The biggest risk is data quality, not model choice. Invest heavily in step 1 and
+the quality filtering in Phase 1 of section 3.2 before spending GPU time on
+fine-tuning.

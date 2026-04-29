@@ -1,4 +1,4 @@
-import { RecordsDiff, structuredClone, TLRecord } from 'tldraw'
+import { RecordsDiff, squashRecordDiffsMutable, structuredClone, TLRecord } from 'tldraw'
 import { AgentAction } from '../../../shared/types/AgentAction'
 import { ChatHistoryItem } from '../../../shared/types/ChatHistoryItem'
 import { Streaming } from '../../../shared/types/Streaming'
@@ -17,6 +17,12 @@ export class AgentActionManager extends BaseAgentManager {
 	 * Used by the `getAgentActionUtil` method.
 	 */
 	private agentActionUtils: Record<AgentAction['_type'], AgentActionUtil<AgentAction>>
+
+	/**
+	 * Accumulated diff across all actions in the current request.
+	 * Used by lecture generation to capture the total visual change for a chunk.
+	 */
+	private _accumulatedDiff: RecordsDiff<TLRecord> | null = null
 
 	/**
 	 * The agent action util instance for the "unknown" action type.
@@ -113,6 +119,13 @@ export class AgentActionManager extends BaseAgentManager {
 			this.agent.setIsActingOnEditor(false)
 		}
 
+		// Accumulate diffs for lecture chunk capture
+		if (this._accumulatedDiff === null) {
+			this._accumulatedDiff = structuredClone(diff)
+		} else {
+			squashRecordDiffsMutable(this._accumulatedDiff, [diff])
+		}
+
 		// Add the action to chat history
 		if (util.savesToHistory()) {
 			const historyItem: ChatHistoryItem = {
@@ -155,5 +168,15 @@ export class AgentActionManager extends BaseAgentManager {
 		}
 
 		return { diff, promise }
+	}
+
+	/**
+	 * Returns the accumulated diff of all actions since the last clear, then resets it.
+	 * Used by lecture generation to capture the total visual change for a chunk.
+	 */
+	getAndClearAccumulatedDiff(): RecordsDiff<TLRecord> | null {
+		const diff = this._accumulatedDiff
+		this._accumulatedDiff = null
+		return diff
 	}
 }

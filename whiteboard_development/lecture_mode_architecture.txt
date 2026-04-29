@@ -1,0 +1,324 @@
+LECTURE MODE: ARCHITECTURE & SYSTEM OVERVIEW
+============================================
+Feature: Chunked visual explanation generation
+Date: 2026-04-20
+
+
+=== PURPOSE ===
+
+Adds a "Lecture" mode to the tldraw AI agent that generates step-by-step
+visual explanations — like a lecturer adding to a whiteboard over the course
+of a talk. The user provides a topic; the system produces a sequence of
+(spoken-word explanation, whiteboard visual diff) pairs that can be navigated
+like slides while the canvas updates to match each step.
+
+The right-side panel gets a second tab:
+  - Chat tab:    existing agent interface (unchanged)
+  - Lecture tab: student-facing view with flowing script text
+
+
+=== TWO-PANEL PHILOSOPHY ===
+
+  CHAT TAB (agent-facing)
+    - All existing behavior unchanged
+    - Shows generation activity during lecture production:
+      action icons, think steps, create/move operations, etc.
+    - Developer/author view: see what the AI is doing
+
+  LECTURE TAB (student-facing)
+    - Only the explanation text, rendered as flowing prose
+    - No agent action icons, no diff viewers, no accept/reject buttons
+    - Active chunk: full opacity. Inactive: ~35% opacity
+    - Subtle pencil-icon separator between chunks (= "drawing pause")
+    - Clicking a chunk navigates the canvas to that point in the lecture
+
+
+=== HIGH-LEVEL DATA FLOW ===
+
+  User types a topic, clicks [▶ Lecture]
+        │
+        ▼
+  PHASE 1 — OUTLINE GENERATION
+    Agent mode: 'outline'
+    LLM is given the topic and asked to produce N lecture-chunk actions.
+    Each lecture-chunk action contains:
+      title:  short label (internal only, never shown to student)
+      text:   the prose paragraph a student will read / hear
+      intent: visual director's notes for Phase 2
+
+    No canvas changes happen during Phase 1.
+    Chunks accumulate in AgentLectureManager.
+        │
+        ▼
+  PHASE 2 — PER-CHUNK VISUAL GENERATION
+    For each chunk i = 0 .. N-1:
+      Agent mode: 'visualize'
+      Canvas shows: base snapshot + chunks[0..i-1] diffs (already applied)
+      LLM is given:
+        - Screenshot of current canvas state
+        - Chunk i's text + intent (via CurrentChunkPart prompt part)
+        - Prior chunk texts for narrative context
+        - Visual design guidelines (new system prompt section)
+      LLM outputs: standard visual actions (create, move, pen, etc.)
+      All diffs from these actions are merged → stored as chunks[i].diff
+
+    After all chunks: canvas reverts to base + chunk[0].diff applied.
+    Lecture tab switches to chunk 0 (first position).
+        │
+        ▼
+  USER NAVIGATES ← / → (or ↑/↓ keyboard)
+    navigateToChunk(targetIndex):
+      1. editor.store.loadSnapshot(baseSnapshot)     ← restore blank state
+      2. for i = 0..targetIndex:
+           editor.store.applyDiff(chunks[i].diff)   ← replay cumulatively
+      3. $currentChunkIndex atom updates → UI re-renders
+
+    Canvas physically reflects "up to and including chunk N" at all times.
+        │
+        ▼
+  AUTO-SAVE
+    After generation completes, a JSON file is saved to disk containing
+    the full lecture sequence (base snapshot + all chunk diffs).
+    Can be re-imported later for exact replay.
+
+
+=== NEW FILES ===
+
+  shared/types/LectureChunk.ts
+    Interface: { id, index, title, text, intent, diff, status }
+    status: 'outline' | 'visualizing' | 'complete'
+
+  shared/types/LectureSequence.ts
+    Interface for the saved JSON file:
+    { version, id, title, prompt, createdAt, modelName,
+      baseSnapshot: { store, schema },
+      chunks: [ { index, title, text, intent, diff } ] }
+
+  client/agent/managers/AgentLectureManager.ts
+    Manages all lecture state via tldraw atoms (reactive):
+      $chunks              — array of LectureChunk
+      $currentChunkIndex   — which chunk the canvas is currently showing
+      $currentVisualizingIndex — which chunk is being visualized in Phase 2
+      $isGenerating        — whether generation is running
+      $baseSnapshot        — saved canvas state before lecture started
+
+    Key methods:
+      startLecture()       — save base snapshot, reset all state
+      addOutlineChunk()    — called by LectureChunkActionUtil during Phase 1
+      setVisualizingIndex()— called by generateLecture() before each Phase 2 call
+      setChunkDiff()       — stores the merged diff after each chunk's visuals
+      navigateToChunk()    — replay diffs to reach a target chunk state
+      finishGeneration()   — mark done, navigate to chunk 0
+      exportToFile()       — returns LectureSequenceFile object
+      importFromFile()     — restores state from a saved file
+
+  client/actions/LectureChunkActionUtil.ts
+    Action util for the 'lecture-chunk' action type.
+    Only active in 'outline' mode.
+    savesToHistory() → false  (doesn't clutter the chat history)
+    applyAction():   calls agent.lecture.addOutlineChunk() when action.complete
+
+  client/parts/CurrentChunkPartUtil.ts
+    Prompt part active only in 'visualize' mode.
+    Sends to the LLM:
+      - Which chunk number this is (e.g., "chunk 2 of 5")
+      - The chunk's text and intent
+      - Summary of all previous chunks (for narrative continuity)
+      - Reminder: only add visuals for this chunk, don't touch existing shapes
+
+  client/components/lecture/LectureTab.tsx
+    Main lecture tab component.
+    Renders the flowing script with chunk text paragraphs and separators.
+    Handles keyboard navigation (↑/↓), generation progress display.
+
+  client/components/lecture/LectureChunkText.tsx
+    Renders one chunk's text as a paragraph.
+    No title, no agent UI.
+    className driven by active/inactive/visualizing state → CSS opacity.
+
+  client/components/lecture/LectureChunkSeparator.tsx
+    Subtle dotted rule with pencil icon between chunks.
+    Represents "the lecturer pauses to draw."
+
+  client/components/lecture/LectureNavigation.tsx
+    Prev / Next buttons + "2 of 5" counter + Export / Import buttons.
+
+  client/utils/lectureFilePersistence.ts
+    saveLectureSequenceToFile(): uses File System Access API (Chrome/Edge)
+      with fallback to <a download> trigger.
+    loadLectureSequenceFromFile(): opens file picker → JSON parse.
+
+  worker/prompt/sections/visual-design-section.ts
+    New system prompt section injected only in 'visualize' mode.
+    Teaches the LLM:
+      - Spatial hierarchy and whitespace rules
+      - Color coding scheme (blue=primary, orange=example, green=outcome, etc.)
+      - Typography sizing (xl for titles, m for body, autoSize for standalone text)
+      - Sequential design: always ADD, never delete/move prior elements
+      - Shape selection guide (rectangle=entity, ellipse=state, arrow=flow, etc.)
+
+
+=== MODIFIED FILES ===
+
+  shared/schema/AgentActionSchemas.ts
+    + LectureChunkAction: { _type:'lecture-chunk', title, text, intent }
+
+  shared/schema/PromptPartDefinitions.ts
+    + CurrentChunkPart: { type:'current-chunk', chunkIndex, totalChunks,
+                          title, text, intent, previousChunksContext }
+    + CurrentChunkPartDefinition with priority -55
+
+  client/agent/TldrawAgent.ts
+    + lecture: AgentLectureManager  (new manager property)
+    + generateLecture(input): method orchestrating the two-phase process
+
+  client/agent/managers/AgentActionManager.ts
+    + _accumulatedDiff tracking (merged RecordsDiff across all actions in a request)
+    + getAndClearAccumulatedDiff(): called by generateLecture after each Phase 2 call
+
+  client/modes/AgentModeDefinitions.ts
+    + 'outline' mode: parts=[mode,modelName,messages,screenshot,blurryShapes,
+                               chatHistory,time]
+                      actions=[lecture-chunk, think, message]
+    + 'visualize' mode: parts=[mode,modelName,messages,current-chunk,screenshot,
+                                viewportBounds,blurryShapes,peripheralShapes,
+                                chatHistory,time]
+                        actions=[create,update,delete,move,place,pen,align,
+                                 distribute,stack,rotate,resize,bringToFront,
+                                 sendToBack,label,think,setMyView]
+
+  client/components/ChatPanel.tsx
+    + Tab bar: [Chat] [Lecture]
+    + [▶ Lecture] button in header (calls agent.generateLecture())
+    + Conditional render: ChatHistory vs LectureTab
+
+  worker/prompt/buildSystemPrompt.ts
+    + Inject visual-design-section when mode === 'visualize'
+
+  worker/prompt/sections/rules-section.ts
+    + When mode === 'outline': inject lecture text-writing instructions
+      (prose voice, natural flow, no bullets, pause-point structure)
+
+
+=== LECTURE TAB LAYOUT ===
+
+  ┌─────────────────────────────┐
+  │ [Chat]  [Lecture]   [+] [▶] │  tab bar; [+]=new chat, [▶]=generate lecture
+  ├─────────────────────────────┤
+  │                             │
+  │  The loss function gives    │  chunk 0 — opacity 0.35 (inactive)
+  │  us a way to measure how    │  clicking navigates canvas here
+  │  far our model's            │
+  │  predictions are from...    │
+  │                             │
+  │  ┄┄┄┄┄┄  ✎  ┄┄┄┄┄┄┄┄┄┄┄  │  separator: drawing moment
+  │                             │
+  │  Now that we can see the    │  chunk 1 — opacity 1.0 (ACTIVE)
+  │  loss surface plotted out,  │  canvas shows chunks 0+1
+  │  think about the shape of   │
+  │  this landscape. Gradient   │
+  │  descent is simply finding  │
+  │  the downhill direction...  │
+  │                             │
+  │  ┄┄┄┄┄┄  ✎  ┄┄┄┄┄┄┄┄┄┄┄  │  separator
+  │                             │
+  │  Each step we take is       │  chunk 2 — opacity 0.35 (inactive)
+  │  proportional to the...     │
+  │                             │
+  ├─────────────────────────────┤
+  │  [←]     2 of 5     [→]    │  navigation
+  │       [Export] [Import]     │
+  └─────────────────────────────┘
+
+
+=== SAVED FILE FORMAT ===
+
+  whiteboard_development/lectures/lecture_<id>.json
+
+  {
+    "version": "1.0",
+    "id": "lecture-1713456789",
+    "title": "Gradient Descent",
+    "prompt": "Explain gradient descent step by step",
+    "createdAt": "2026-04-20T14:00:00Z",
+    "modelName": "claude-opus-4-5",
+    "baseSnapshot": {
+      "store": { ... tldraw store records ... },
+      "schema": { ... tldraw schema ... }
+    },
+    "chunks": [
+      {
+        "index": 0,
+        "title": "Introducing the loss function",
+        "text": "The loss function gives us a way to measure...",
+        "intent": "Draw a 2D axes, label y-axis 'Loss', x-axis 'Predictions'...",
+        "diff": {
+          "added": { "shape:abc123": { ... TLRecord ... } },
+          "updated": {},
+          "removed": {}
+        }
+      },
+      ...
+    ]
+  }
+
+  To replay exactly: import the file → navigateToChunk(0) restores base
+  snapshot + chunk 0 diff. Navigating forward replays diffs cumulatively.
+
+
+=== PROMPT STRATEGY RATIONALE ===
+
+WHY TWO PHASES?
+  The LLM cannot simultaneously plan a coherent 5-chunk narrative AND
+  generate precise tldraw coordinates for shapes that don't exist yet.
+  Splitting into outline (text) then visualize (shapes) lets each call
+  focus on one task, and critically: the Phase 2 call for chunk 3 can
+  see the actual screenshot of what chunks 1+2 produced — so it places
+  shapes relative to real existing elements, not imagined ones.
+
+WHY LECTURE-CHUNK IS A TLDRAW ACTION?
+  The existing agent streaming infrastructure handles partial JSON,
+  sanitization, and history tracking. Reusing it for outline generation
+  means we don't need a separate streaming protocol. The action just
+  happens to write to AgentLectureManager instead of the editor.
+
+WHY NOT SHOW TITLES IN THE LECTURE TAB?
+  The text chunks should read as a single continuous script. Titles would
+  break the narrative flow and make it feel like slides, not a lecture.
+  Titles are preserved internally (in the JSON file, in the LLM's
+  organization) but never surface to the student view.
+
+THE SEPARATOR METAPHOR
+  The dotted rule + pencil icon between chunks communicates the whiteboard
+  drawing pause without using words. Students understand: "here the
+  lecturer drew something; navigate forward to see it."
+
+VISUAL DESIGN IN THE PROMPT
+  Rather than a separate "visual expert" agent (which the user may add
+  later), design knowledge is baked into the visualize-mode system prompt.
+  This section is modular: it's a single function in visual-design-section.ts
+  and can be replaced or augmented by a dedicated visual-expert agent later
+  without touching the rest of the architecture.
+
+
+=== HOW TO EXTEND LATER ===
+
+Adding a visual expert agent:
+  Replace or supplement the visual-design-section.ts content.
+  The expert could be a separate LLM call before each Phase 2 call
+  that refines the intent string before it reaches the main visualize call.
+
+Supporting multiple lectures:
+  AgentLectureManager currently holds one lecture at a time.
+  Extend to $lectures: Atom<Map<string, LectureChunk[]>> with a
+  $activeLectureId selector.
+
+Adding audio narration:
+  The chunk text is already narration-ready prose. Feed it to a
+  TTS API (e.g., ElevenLabs) during export. The JSON file already
+  has all the text fields needed.
+
+Regenerating a single chunk:
+  Add a "Regenerate visuals" button per chunk in the lecture tab.
+  This runs Phase 2 for only that chunk, captures the new diff,
+  stores it, and replays navigation from that point.

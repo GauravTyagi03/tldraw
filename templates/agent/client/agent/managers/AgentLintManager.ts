@@ -138,6 +138,19 @@ export class AgentLintManager extends BaseAgentManager {
 	// ============================================================================
 
 	/**
+	 * Populate createdShapeIds with every shape currently on the canvas.
+	 * Call this before a composite review pass to lint the full canvas.
+	 */
+	populateFromAllShapes(): void {
+		const shapes = this.agent.editor.getCurrentPageShapesSorted()
+		this.createdShapeIds.clear()
+		this.surfacedLintKeys.clear()
+		for (const shape of shapes) {
+			this.createdShapeIds.add(shape.id)
+		}
+	}
+
+	/**
 	 * Detect all canvas lints on a set of shapes.
 	 */
 	detectCanvasLints(shapes: TLShape[]): AgentCanvasLint[] {
@@ -147,6 +160,8 @@ export class AgentLintManager extends BaseAgentManager {
 		const growYShapes = this.getShapesWithGrowY(shapes)
 		const overlappingTextGroups = this.getOverlappingTextGroups(shapes)
 		const friendlessArrows = this.getFriendlessArrows(shapes)
+		const nearlyAlignedPairs = this.getNearlyAlignedPairs(shapes)
+		const inconsistentSizingGroups = this.getInconsistentSizingGroups(shapes)
 
 		// Convert shapes to lints (converting shape IDs to strings)
 		for (const shape of growYShapes) {
@@ -167,6 +182,20 @@ export class AgentLintManager extends BaseAgentManager {
 			lints.push({
 				type: 'friendless-arrow',
 				shapeIds: [convertTldrawIdToSimpleId(arrow.id)],
+			})
+		}
+
+		for (const pair of nearlyAlignedPairs) {
+			lints.push({
+				type: 'nearly-aligned',
+				shapeIds: pair.map((shape) => convertTldrawIdToSimpleId(shape.id)),
+			})
+		}
+
+		for (const group of inconsistentSizingGroups) {
+			lints.push({
+				type: 'inconsistent-sizing',
+				shapeIds: group.map((shape) => convertTldrawIdToSimpleId(shape.id)),
 			})
 		}
 
@@ -283,6 +312,101 @@ export class AgentLintManager extends BaseAgentManager {
 		})
 
 		return friendlessArrows
+	}
+
+	/**
+	 * Find pairs of non-arrow shapes that are nearly (but not exactly) aligned on
+	 * a shared axis — within ALIGN_THRESHOLD px — and close enough to each other
+	 * (within PROXIMITY_THRESHOLD px) that the misalignment is clearly unintentional.
+	 *
+	 * Axes checked: centerX, centerY, left edge, right edge, top edge, bottom edge.
+	 */
+	private getNearlyAlignedPairs(shapes: TLShape[]): TLShape[][] {
+		const ALIGN_THRESHOLD = 8 // px — gap small enough to be a mistake
+		const PROXIMITY_THRESHOLD = 500 // px — only flag shapes that are close to each other
+
+		const { editor } = this.agent
+		const candidates = shapes.filter((s) => s.type !== 'arrow' && s.type !== 'text')
+		const pairs: TLShape[][] = []
+		const reported = new Set<string>()
+
+		for (let i = 0; i < candidates.length; i++) {
+			const a = candidates[i]
+			const boundsA = editor.getShapePageBounds(a)
+			if (!boundsA) continue
+
+			for (let j = i + 1; j < candidates.length; j++) {
+				const b = candidates[j]
+				const boundsB = editor.getShapePageBounds(b)
+				if (!boundsB) continue
+
+				// Skip if shapes are far apart
+				const centerDist = Math.hypot(boundsA.midX - boundsB.midX, boundsA.midY - boundsB.midY)
+				if (centerDist > PROXIMITY_THRESHOLD) continue
+
+				const pairKey = [a.id, b.id].sort().join(':')
+				if (reported.has(pairKey)) continue
+
+				const deltas = [
+					Math.abs(boundsA.midX - boundsB.midX), // center-X alignment
+					Math.abs(boundsA.midY - boundsB.midY), // center-Y alignment
+					Math.abs(boundsA.minX - boundsB.minX), // left-edge alignment
+					Math.abs(boundsA.maxX - boundsB.maxX), // right-edge alignment
+					Math.abs(boundsA.minY - boundsB.minY), // top-edge alignment
+					Math.abs(boundsA.maxY - boundsB.maxY), // bottom-edge alignment
+				]
+
+				const isNearlyAligned = deltas.some((d) => d > 0 && d <= ALIGN_THRESHOLD)
+				if (isNearlyAligned) {
+					pairs.push([a, b])
+					reported.add(pairKey)
+				}
+			}
+		}
+
+		return pairs
+	}
+
+	/**
+	 * Find groups of same-type geo shapes where sizes are nearly (but not exactly)
+	 * equal — width or height differs by 1–THRESHOLD px.
+	 * These are most likely meant to be the same size and should be normalised.
+	 */
+	private getInconsistentSizingGroups(shapes: TLShape[]): TLShape[][] {
+		const SIZE_THRESHOLD = 15 // px — differences larger than this are probably intentional
+
+		const { editor } = this.agent
+		const geoShapes = shapes.filter((s) => s.type === 'geo')
+		const groups: TLShape[][] = []
+		const reported = new Set<string>()
+
+		for (let i = 0; i < geoShapes.length; i++) {
+			const a = geoShapes[i]
+			const boundsA = editor.getShapePageBounds(a)
+			if (!boundsA) continue
+
+			for (let j = i + 1; j < geoShapes.length; j++) {
+				const b = geoShapes[j]
+				const boundsB = editor.getShapePageBounds(b)
+				if (!boundsB) continue
+
+				const pairKey = [a.id, b.id].sort().join(':')
+				if (reported.has(pairKey)) continue
+
+				const dw = Math.abs(boundsA.w - boundsB.w)
+				const dh = Math.abs(boundsA.h - boundsB.h)
+
+				// Flag if both dimensions are nearly equal (likely meant to be the same)
+				const bothNearlyEqual = dw > 0 && dw <= SIZE_THRESHOLD && dh > 0 && dh <= SIZE_THRESHOLD
+
+				if (bothNearlyEqual) {
+					groups.push([a, b])
+					reported.add(pairKey)
+				}
+			}
+		}
+
+		return groups
 	}
 
 	// ============================================================================

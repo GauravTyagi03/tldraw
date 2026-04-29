@@ -1,0 +1,443 @@
+FINE-TUNING DATA STRATEGY: HUMAN SIGNAL AND EIGENDIAGRAMS
+Stanford Whiteboard Agent — April 2026
+=======================================================
+
+
+THE CENTRAL PROBLEM: LEARNING FROM A MEDIOCRE TEACHER
+------------------------------------------------------
+
+The previous document proposed using Claude's own outputs as training data. This
+is circular and self-limiting. If the frontier model already produces misaligned
+shapes, poor visual hierarchy, and inconsistent color usage, training on those
+outputs teaches the student model to replicate those exact mistakes.
+
+This is the classic knowledge distillation failure mode: the student cannot
+surpass the teacher if the teacher's outputs are the only training signal. You
+need a signal that is *better* than the model's current performance.
+
+Three sources can provide that better signal:
+
+  1. Humans who are better than the model at visual design and pedagogy
+  2. Programmatically generated perfect examples (for well-defined diagram types)
+  3. The model's best outputs, selected and corrected by humans — a human-in-the-
+     loop amplification rather than pure human generation
+
+This document focuses on how to structure all three.
+
+
+PART 1: EIGENDIAGRAMS — THE CORE IDEA
+--------------------------------------
+
+1.1  MOTIVATION
+
+Educational whiteboard content is not random. Across all subjects — biology,
+mathematics, computer science, economics, history — the *structure* of the
+diagrams that appear recurs in a small number of canonical forms. A taxonomy of
+organisms, a sorting algorithm, a supply-demand model, and a Git branching
+strategy are all, structurally, tree or flow diagrams. The content differs; the
+underlying visual grammar does not.
+
+This suggests a basis-decomposition view of the diagram space:
+
+  Any educational diagram ≈ f(structural_template, content_domain, complexity)
+
+where the number of structural templates is small (perhaps 10–15 types cover
+80–90% of educational content) while content domains and complexity vary widely.
+
+If a model learns to draw the structural templates well — learns the spatial logic
+of trees, flows, comparisons, cycles — it gains the ability to apply those
+templates to new content it has never seen. This is the "eigendiagram" idea:
+a compact, representative basis set from which the full space of diagrams is
+reachable by conceptual substitution.
+
+1.2  THE CANDIDATE EIGENDIAGRAM SET
+
+The following 12 structural templates are proposed as the initial basis:
+
+  T1  HIERARCHY / TREE
+      - Organizational charts, taxonomies, cladograms, parse trees, decision trees
+      - Spatial logic: parent above children, children evenly spaced, arrows
+        point downward
+      - Variations: binary tree, n-ary tree, indented outline, radial tree
+
+  T2  SEQUENCE / FLOW
+      - Algorithms, pipelines, protocols, historical timelines, assembly lines
+      - Spatial logic: left-to-right or top-to-bottom, shapes connected by
+        sequential arrows, decision branches
+      - Variations: linear flow, branching flowchart, swimlane, timeline
+
+  T3  CYCLE / FEEDBACK LOOP
+      - Water cycle, Krebs cycle, PDCA, agile sprint, feedback control systems
+      - Spatial logic: closed-loop arrows, typically circular or elliptical
+        arrangement of nodes
+      - Variations: 3-step, 4-step, 6-step, with/without center node
+
+  T4  CAUSE-EFFECT / CAUSAL CHAIN
+      - Fishbone (Ishikawa) diagrams, domino effects, causal graphs
+      - Spatial logic: central spine with branching causes, or linear A→B→C chains
+      - Variations: fishbone, linear chain, fan-out, convergent (many causes → one
+        effect)
+
+  T5  COMPARISON / MATRIX
+      - 2×2 strategy matrices (BCG, Eisenhower), pros-and-cons, side-by-side
+        feature comparison
+      - Spatial logic: grid cells or parallel columns with aligned headers
+      - Variations: 2×2 quadrant, N-column table, Venn diagram (overlap comparison)
+
+  T6  PART-WHOLE / COMPOSITION
+      - Exploded views, system architecture (components inside a container), layers
+        (OSI model, atmosphere layers)
+      - Spatial logic: nested boxes, or exploded with labeled parts and leaders
+      - Variations: nested boxes, horizontal layers, exploded with arrows
+
+  T7  NETWORK / GRAPH
+      - Social networks, concept maps, knowledge graphs, chemical bonds
+      - Spatial logic: force-directed or semantically clustered; edges are
+        bidirectional or typed
+      - Variations: sparse graph, dense cluster, bipartite, hub-and-spoke
+
+  T8  BEFORE / AFTER / TRANSFORMATION
+      - Chemical reactions, state transitions, data transformations, before-after
+        comparisons, metamorphosis
+      - Spatial logic: two panels separated by a transformation arrow or operator
+      - Variations: single step, multi-step chain, reversible double-arrow
+
+  T9  AXIS / CONCEPTUAL PLOT
+      - Conceptual scatter plots (effort vs. impact), spectra (acid-base),
+        phase diagrams, Punnett squares
+      - Spatial logic: labeled axes, regions or points placed relative to axes
+      - Variations: 1D spectrum, 2D quadrant plot, 3D conceptual
+
+  T10 FORCE / BALANCE / EQUILIBRIUM
+      - Free-body diagrams, supply-demand equilibrium, tug-of-war, scales
+      - Spatial logic: opposing arrows of varying thickness/length indicating
+        magnitude, balance point marked
+      - Variations: static equilibrium, dynamic imbalance, multiple competing forces
+
+  T11 ABSTRACTION LADDER
+      - Levels of abstraction in CS (hardware → OS → application), biological
+        hierarchy (atom → molecule → cell → organ), semantic zoom
+      - Spatial logic: horizontal layers from concrete (bottom) to abstract (top),
+        bidirectional arrows between adjacent layers
+      - Variations: 3-layer, 5-layer, with/without examples at each level
+
+  T12 ANALOGY / MAPPING
+      - Cross-domain analogies (electricity ↔ water flow, DNA ↔ blueprint),
+        mathematical isomorphisms, metaphor diagrams
+      - Spatial logic: two parallel structures with horizontal correspondence arrows
+      - Variations: 1-to-1 mapping, many-to-many, with shared abstract structure
+        shown above
+
+1.3  PROGRAMMATIC GENERATION OF PERFECT EXAMPLES
+
+The critical advantage of eigendiagrams is that well-defined templates can be
+*algorithmically rendered* as perfect tldraw action sequences — without involving
+the model at all.
+
+Example: T1 (Hierarchy / Tree)
+
+  Given: a tree structure (list of (parent, child, label) tuples)
+  Algorithm:
+    1. Compute each node's depth and position within its depth level
+    2. Place nodes as geo rectangles with consistent width and spacing
+       (e.g., horizontal gap = 60px, vertical gap = 80px between levels)
+    3. Center children below their parent
+    4. Create arrows from each parent to each child
+    5. Apply color by depth level (consistent across all T1 examples)
+    6. Emit as a sequence of CreateAction calls
+
+  Output: a *provably correct* sequence of tldraw actions that produces:
+    - Perfect alignment (all nodes at depth 2 share the same Y coordinate)
+    - Consistent sizing (all nodes 120×40 by default)
+    - Zero lint errors
+    - Readable layout at any complexity from 3 nodes to 30 nodes
+
+This can be implemented as a Python or TypeScript script outside the agent. The
+script is essentially a domain-specific compiler: (semantic graph) → (tldraw
+action sequence). Each generated example is simultaneously:
+  - A training input: the system prompt + user request describing the diagram
+  - A training target: the perfect action sequence
+
+By varying the content (different tree structures, different labels, different
+domains) while holding the structure fixed, you get high-quality diversity within
+each template without any model inference.
+
+Templates with high programmatic generatability:
+  T1 (tree), T2 (flow), T3 (cycle), T5 (grid matrix), T6 (nested/layers),
+  T9 (axis), T11 (abstraction ladder)
+
+Templates that need human drawing or hybrid approach:
+  T4 (fishbone — irregular branching), T7 (network — layout is aesthetic),
+  T8 (before/after — content-dependent), T10 (force diagrams — magnitude
+  encoding), T12 (analogy — requires conceptual alignment)
+
+Target generation scale:
+  - 50–100 content instances per template × 12 templates = 600–1200 examples
+  - Each with 3 complexity levels (simple, medium, complex)
+  - Total: 1800–3600 algorithmically perfect training examples
+
+This is a relatively small but very high quality dataset. It teaches the model
+the spatial grammar of each template type without any noise from model errors.
+
+
+PART 2: HUMAN DATA COLLECTION
+-------------------------------
+
+2.1  THE QUALITY PROBLEM WITH HUMAN DATA
+
+Human-drawn whiteboard diagrams are not automatically high-quality training signal.
+Instructors drawing on physical whiteboards use imprecise layouts because they are
+thinking about the concept, not the geometry. Direct annotation of existing slides
+or textbook diagrams is similarly noisy.
+
+What you need is *intentional* human drawing where the human is specifically trying
+to produce a good diagram in the tldraw system. This constrains who the annotators
+can be: they need to be both domain experts AND comfortable using the tool.
+
+Three viable populations:
+  a) Course instructors who already use digital whiteboards
+  b) Graduate students or TAs trained on the tool for 1–2 hours
+  c) Professional information designers / scientific illustrators (highest quality,
+     lowest scale, highest cost)
+
+2.2  DATA COLLECTION MODALITIES
+
+--- MODALITY A: Expert Demonstrations ---
+
+An expert uses the whiteboard agent in a special "capture mode" to draw a
+complete diagram from scratch. The system records the full action sequence.
+
+What you get: (user_prompt, action_sequence, final_canvas_state)
+Quality: High — the human is fully responsible for layout decisions
+Scale: Low — 30–60 minutes per expert per session, ~5–20 diagrams per session
+Cost: Moderate — requires trained annotators
+
+Interface requirements:
+  - A clean version of the agent with the AI generation disabled
+  - A "record session" button that captures all shape creation events as
+    tldraw CreateAction / MoveAction / etc. (the store diffs are already computed)
+  - A metadata form: topic, intended audience, diagram type (eigendiagram label)
+  - A review step where the expert can annotate quality ("would improve X but
+    ran out of time")
+
+The action sequence recorded here is NOT the model's output — it is the sequence
+of human edits translated into the agent's action format. The tldraw store already
+tracks this as `RecordsDiff` objects. The human's work just needs to be translated
+into the canonical action schema post-hoc (a straightforward mapping).
+
+--- MODALITY B: Human Correction of Model Outputs ---
+
+The agent generates a diagram. A human expert sees the result and makes
+corrections — moving shapes, resizing, relabeling, fixing alignment. The system
+captures both the original output and the human's corrections.
+
+What you get: (prompt, model_action_sequence, human_correction_actions)
+Quality: Medium-high — humans correct specific mistakes rather than generating
+         from scratch, so the resulting diagrams may have subtle residual issues
+Scale: Higher — reviewing and correcting is faster than generating from scratch
+Cost: Lower — less demanding on annotator skill
+
+Training format option A (standard SFT):
+  Treat (prompt, model_output + human_corrections combined) as the target sequence.
+  This teaches the model to produce the corrected result directly.
+
+Training format option B (rejection sampling):
+  The model output is the "rejected" sample; the human-corrected output is
+  "chosen". Use for DPO.
+
+Training format option C (edit prediction):
+  Train the model to predict the human's correction actions given the model's
+  output as context. This is a more targeted skill: "given what you drew, here
+  is what a human would fix." Harder to set up but potentially more sample-efficient.
+
+--- MODALITY C: Pairwise Human Preference ---
+
+Generate 2–4 diagram variants for the same prompt (using different temperatures
+or different system prompt wordings). Show them side-by-side to a human evaluator
+who picks the best one.
+
+What you get: preference pairs (prompt, chosen_sequence, rejected_sequence)
+Quality: Lower-bound on the chosen sequence's quality (the human is selecting
+         from options that may all be mediocre)
+Scale: Very high — can be crowdsourced with brief annotator training
+Cost: Low per example; moderate setup
+
+This generates DPO training data without requiring annotators to know how to draw.
+The tradeoff is that you're selecting the least-bad option from a set of model
+outputs, which limits how much you can exceed the model's current ceiling.
+
+Recommendation: Use pairwise preference as a *supplement* to modalities A and B,
+not as a primary signal. It is good for fine-grained preference tuning once a
+base level of quality is established.
+
+2.3  ANNOTATION INTERFACE DESIGN
+
+For modality A (demonstrations) and B (corrections), the interface needs to present
+the task in terms of *pedagogical intent*, not technical parameters.
+
+What NOT to ask annotators:
+  "Set the x coordinate of this shape to 340 and width to 120"
+
+What TO ask annotators:
+  "Draw a diagram that would help a student understand X"
+  "This diagram is supposed to show Y. What's wrong with it? Fix it."
+
+The technical translation (human action → tldraw action sequence) happens
+automatically via the existing store diff mechanism.
+
+Annotation quality control:
+  - Show annotators a calibration set of 5 known-good and 5 known-bad diagrams
+    before their session to calibrate their standards
+  - Flag annotations where the diagram has obvious lints (programmatic check)
+    and ask the annotator to review before submitting
+  - Track inter-annotator agreement on the pairwise preference tasks
+
+
+PART 3: CURRICULUM STRUCTURE
+------------------------------
+
+The data sources above imply a natural training curriculum:
+
+Phase 0 — STRUCTURAL GRAMMAR (programmatic eigendiagrams)
+  Data: 1800–3600 algorithmically generated perfect examples across 12 templates
+  Goal: Teach the model the spatial conventions for each diagram type
+  Duration: 1–2 fine-tuning epochs
+  Expected outcome: Model reliably produces correctly aligned, consistently sized
+  shapes for well-defined structures. Zero or near-zero lint errors on template-
+  conforming examples.
+
+Phase 1 — DOMAIN TRANSFER (human demonstrations on domain-specific content)
+  Data: 500–2000 expert-drawn diagrams covering science, math, CS, social science
+  Goal: Teach the model to apply structural templates to real educational content
+  Duration: 1–2 fine-tuning epochs on top of Phase 0 checkpoint
+  Expected outcome: Model produces pedagogically sensible diagrams for domain-
+  specific queries without explicit template labels in the prompt.
+
+Phase 2 — SELF-CORRECTION (human corrections of model outputs)
+  Data: 300–1000 (model output, human correction) pairs
+  Goal: Teach the model to fix its own mistakes when given lint feedback
+  Training format: Either SFT on corrected sequences or DPO
+  Duration: 1 epoch
+  Expected outcome: Reduced need for multiple lint-correction passes; the initial
+  output is better and the correction pass is more targeted.
+
+Phase 3 — PREFERENCE ALIGNMENT (pairwise human preferences)
+  Data: 1000–5000 preference pairs (cheap to collect if crowdsourced)
+  Goal: Align the model's quality distribution with human aesthetic preferences
+  Training format: DPO with beta ≈ 0.05–0.1
+  Duration: 1 epoch
+  Expected outcome: Improved visual balance, color consistency, and layout
+  elegance on novel queries.
+
+
+PART 4: THE EIGENDIAGRAM — LLM INTERACTION MODEL
+--------------------------------------------------
+
+There is a more sophisticated way to think about how eigendiagrams interact with
+the fine-tuned model at inference time.
+
+Rather than treating the eigendiagram types as a classification taxonomy (i.e.,
+"first classify the query, then draw the matching template"), consider a softer
+and more powerful approach:
+
+STEP 1 — RETRIEVAL
+  At inference time, embed the user's query (and optionally a description of
+  the current canvas state) into a semantic space. Retrieve the 1–3 most similar
+  eigendiagram examples from the training set.
+
+STEP 2 — CONDITIONING
+  Prepend those retrieved examples (as action sequences, or as structured
+  descriptions of the template's spatial logic) into the context.
+
+STEP 3 — GENERATION
+  The model generates new actions that follow the spatial grammar of the retrieved
+  templates, but instantiated for the new content.
+
+This is essentially retrieval-augmented generation (RAG) for diagram structure.
+The retrieved eigendiagrams serve as in-context few-shot examples even at
+inference time — not just at training time.
+
+Advantages:
+  - Works even for content domains not seen during fine-tuning
+  - Explicitly surfaces the spatial template to the model, reducing reliance on
+    implicit pattern matching learned during training
+  - The retrieved examples are always correct (perfect programmatic generation),
+    so they provide an anchor against which the model's output can be measured
+
+The embedding for retrieval can be as simple as a SBERT / contriever-style
+text embedding of the query. The retrieval corpus is the eigendiagram library
+(a few thousand examples is easily indexed).
+
+
+PART 5: PRACTICAL STARTING POINT
+----------------------------------
+
+Given constrained resources (single researcher, limited annotation budget):
+
+Week 1-2: Build the programmatic eigendiagram generator
+  Implement generators for T1 (tree), T2 (flow), T3 (cycle), T5 (matrix), and
+  T11 (abstraction ladder) — the five most algorithmically tractable templates.
+  Each generator takes a content specification and emits a correct tldraw action
+  sequence. Target: 100–200 examples per template.
+
+  This requires no model inference, no annotation, no GPU. It is a pure
+  software engineering task that produces ~500–1000 training examples.
+
+Week 3-4: Run 2–3 expert demonstration sessions
+  Work with 2–3 instructors or graduate students for 2–3 hours each.
+  Target: 50–150 high-quality human-drawn diagrams across diverse domains.
+  Focus on the templates the programmatic generator does NOT cover well
+  (T4 fishbone, T7 network, T10 force, T12 analogy).
+
+Week 5-6: Fine-tune Qwen2-VL-7B on the combined dataset
+  Phase 0 on programmatic data, then Phase 1 on human demonstrations.
+  Evaluate by running the agent on 50 held-out queries and scoring:
+    - Lint pass rate (programmatic)
+    - Template recognition accuracy (does the output match the implied template?)
+    - Visual balance score (bounding box symmetry heuristic)
+
+Week 7+: Collect correction data and run Phase 2
+  Run the Phase 1 model on 200 queries. Flag the worst 50% by lint score.
+  Have annotators correct those outputs. Use corrected sequences for Phase 2 SFT.
+
+The key insight is that the programmatic eigendiagram generator is the highest
+ROI activity. It produces perfect training data at essentially zero variable cost
+once the generator is built. Human time should be spent on the templates that
+resist algorithmic generation — the fuzzy, aesthetically complex diagram types
+where human judgment is genuinely irreplaceable.
+
+
+APPENDIX: MAPPING FROM EIGENDIAGRAM TYPES TO ACADEMIC DISCIPLINES
+------------------------------------------------------------------
+
+This illustrates that the 12 templates cover the breadth of educational content:
+
+  Biology:        T1 (taxonomy), T3 (Krebs cycle), T6 (cell composition),
+                  T4 (food web), T8 (before/after in mitosis)
+
+  Chemistry:      T8 (reaction mechanisms), T10 (electron shell balance),
+                  T9 (periodic trends as spectrum), T12 (structural analogy)
+
+  Physics:        T10 (free-body diagrams), T9 (phase diagrams), T2 (circuit flow),
+                  T3 (oscillation cycles)
+
+  Mathematics:    T1 (proof trees), T5 (truth tables), T9 (number line/plot),
+                  T11 (abstraction from sets to structures)
+
+  Computer Science: T1 (binary search tree), T2 (sorting algorithm),
+                  T11 (hardware → OS → app), T7 (network topology),
+                  T6 (memory layout), T4 (dependency graph)
+
+  Economics:      T10 (supply/demand balance), T5 (2×2 strategy matrix),
+                  T2 (production process), T3 (business cycle)
+
+  History:        T2 (timeline), T4 (causes of event), T12 (analogous conflicts),
+                  T8 (before/after period comparison)
+
+  Linguistics:    T1 (parse tree), T8 (sound change), T12 (cross-language
+                  structural analogy), T7 (semantic network)
+
+The same T1 template — slightly varied in visual style — works for a Linnaean
+taxonomy, a corporate org chart, a binary search tree, and a phylogenetic
+cladogram. Training on all four teaches the model that T1's spatial logic is
+invariant across domains, while the labels and color conventions shift.

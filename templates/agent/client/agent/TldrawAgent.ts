@@ -19,6 +19,7 @@ import { AgentChatManager } from './managers/AgentChatManager'
 import { AgentChatOriginManager } from './managers/AgentChatOriginManager'
 import { AgentContextManager } from './managers/AgentContextManager'
 import { AgentDebugFlags, AgentDebugManager } from './managers/AgentDebugManager'
+import { AgentLectureManager } from './managers/AgentLectureManager'
 import { AgentLintManager } from './managers/AgentLintManager'
 import { AgentModelNameManager } from './managers/AgentModelNameManager'
 import { AgentModeManager } from './managers/AgentModeManager'
@@ -104,6 +105,9 @@ export class TldrawAgent {
 	/** The user action tracker associated with this agent. */
 	userAction: AgentUserActionTracker
 
+	/** The lecture manager associated with this agent. */
+	lecture: AgentLectureManager
+
 	// ==================== Prompt Part Utils ====================
 
 	/**
@@ -143,6 +147,7 @@ export class TldrawAgent {
 		this.requests = new AgentRequestManager(this)
 		this.todos = new AgentTodoManager(this)
 		this.userAction = new AgentUserActionTracker(this)
+		this.lecture = new AgentLectureManager(this)
 
 		// Note: Agent registration is handled by AgentAppAgentsManager.createAgent()
 
@@ -215,6 +220,7 @@ export class TldrawAgent {
 		this.modelName.dispose()
 		this.requests.dispose()
 		this.todos.dispose()
+		this.lecture.dispose()
 
 		// Note: Agent removal from registry is handled by AgentAppAgentsManager.deleteAgent()
 	}
@@ -606,7 +612,7 @@ export class TldrawAgent {
 								const actionUtil = this.actions.getAgentActionUtil(action._type)
 
 								// If the action is not in the mode's available actions, skip it
-								if (!availableActions.includes(actionUtilType)) {
+								if (!(availableActions as readonly string[]).includes(actionUtilType)) {
 									return
 								}
 
@@ -668,6 +674,121 @@ export class TldrawAgent {
 		}
 
 		return { promise: requestPromise, cancel }
+	}
+
+	/**
+	 * Generate a lecture sequence from a topic prompt.
+	 *
+	 * Runs a two-phase process:
+	 * - Phase 1 (outline): LLM generates N lecture-chunk actions with text + visual intent
+	 * - Phase 2 (visualize): For each chunk, LLM generates canvas shapes using the current canvas state
+	 *
+	 * After generation, the canvas reflects chunk 0 and the Lecture tab becomes populated.
+	 *
+	 * @param input - The topic or prompt to generate a lecture from.
+	 */
+	async generateLecture(input: AgentInput): Promise<void> {
+		if (this.requests.isGenerating()) {
+			throw new Error('Agent is already generating. Please wait for the current request to finish.')
+		}
+
+		const request = this.requests.getFullRequestFromInput(input)
+		const promptText =
+			typeof input === 'string' ? input : (request.agentMessages[0] ?? 'Untitled lecture')
+
+		this.lecture.startLecture()
+		this.requests.setIsPrompting(true)
+
+		try {
+			// ── Phase 1: outline ──────────────────────────────────────────────
+			this.mode.setMode('outline')
+			this.actions.getAndClearAccumulatedDiff() // clear any stale diff
+
+			await this.request({
+				agentMessages: [
+					`Generate a lecture outline on the following topic. Break it into 3–6 logical chunks that build on each other. For each chunk, write the explanation text a student will read and describe what visuals to draw.\n\nTopic: ${promptText}`,
+				],
+				userMessages: [`Generate lecture: ${promptText}`],
+				bounds: request.bounds,
+				source: 'self',
+				contextItems: [],
+				data: [],
+			})
+
+			const chunks = this.lecture.getChunks()
+			if (chunks.length === 0) {
+				return
+			}
+
+			// ── Phase 2: visualize each chunk ─────────────────────────────────
+			for (let i = 0; i < chunks.length; i++) {
+				this.lecture.setVisualizingIndex(i)
+				if (this.mode.getCurrentModeType() !== 'visualize') {
+					this.mode.setMode('visualize')
+				}
+				this.lints.clearCreatedShapes() // fresh lint tracking for this chunk
+				this.actions.getAndClearAccumulatedDiff() // reset accumulator for this chunk
+
+				await this.request({
+					agentMessages: [
+						`Visualize chunk ${i + 1} of ${chunks.length}. Create visuals that clearly illustrate the concept. Add only what this chunk needs — do not recreate or modify shapes from previous chunks.`,
+					],
+					userMessages: [],
+					bounds: request.bounds,
+					source: 'self',
+					contextItems: [],
+					data: [],
+				})
+
+				// Lint-based correction pass — mirrors what working.onPromptEnd does
+				const lintShapes = this.lints.getCreatedShapes()
+				if (this.lints.hasUnsurfacedLints(lintShapes)) {
+					await this.request({
+						agentMessages: [
+							'The automated linter detected visual problems with what you just drew — overlapping text, text overflowing shapes, or disconnected arrows. Fix them now before moving on.',
+						],
+						userMessages: [],
+						bounds: request.bounds,
+						source: 'self',
+						contextItems: [],
+						data: [],
+					})
+				}
+
+				this.lints.unlockCreatedShapes()
+				const chunkDiff = this.actions.getAndClearAccumulatedDiff()
+				this.lecture.setChunkDiff(i, chunkDiff)
+			}
+
+			// ── Composite review: full canvas with all chunks applied ──────────
+			// At this point every chunk diff is applied in sequence on the canvas.
+			// Run the linter on ALL shapes (not just the last chunk's) so it can
+			// catch alignment, sizing, and design issues that only emerge at scale.
+			this.lints.populateFromAllShapes()
+			const compositeShapes = this.lints.getCreatedShapes()
+			if (this.lints.hasUnsurfacedLints(compositeShapes)) {
+				await this.request({
+					agentMessages: [
+						'COMPOSITE REVIEW: All lecture chunks are now drawn. Review the complete canvas for overall visual quality:\n- Fix any remaining alignment issues (shapes that should share an edge or centre)\n- Normalise shapes that should be the same size but are not\n- Check spacing and visual balance across the whole layout\n- Ensure colour usage is consistent (same concept = same colour throughout)\nFix what needs fixing. Do not redraw or restructure — only correct.',
+					],
+					userMessages: [],
+					bounds: request.bounds,
+					source: 'self',
+					contextItems: [],
+					data: [],
+				})
+			}
+
+			// ── Done ──────────────────────────────────────────────────────────
+			this.lecture.finishGeneration()
+		} finally {
+			// Guard against double-setting 'idling' if an error occurred before setMode('outline') ran
+			if (this.mode.getCurrentModeType() !== 'idling') {
+				this.mode.setMode('idling')
+			}
+			this.requests.setIsPrompting(false)
+			this.requests.setCancelFn(null)
+		}
 	}
 
 	/**
