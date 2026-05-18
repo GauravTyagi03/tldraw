@@ -120,6 +120,20 @@ export interface DebugPart {
 	logMessages: boolean
 }
 
+export interface DesignSkillsPart {
+	type: 'designSkills'
+	skills: {
+		id: string
+		title: string
+		description: string
+		content: string
+		score: number
+		matchedTriggers: string[]
+		alwaysIncluded: boolean
+	}[]
+	rationale: string[]
+}
+
 export interface CurrentChunkPart {
 	type: 'current-chunk'
 	chunkIndex: number
@@ -553,6 +567,12 @@ export const ModePartDefinition: PromptPartDefinition<ModePart> = {
 export const DebugPartDefinition: PromptPartDefinition<DebugPart> = {
 	type: 'debug',
 	// No buildContent - this is metadata for the worker, not prompt content for the model
+}
+
+// DesignSkills - sends selected design guidance to the worker for system prompt construction
+export const DesignSkillsPartDefinition: PromptPartDefinition<DesignSkillsPart> = {
+	type: 'designSkills',
+	// No buildContent - this is metadata for the worker, not a user message
 }
 
 // CurrentChunk - provides context about the chunk being visualized in 'visualize' mode

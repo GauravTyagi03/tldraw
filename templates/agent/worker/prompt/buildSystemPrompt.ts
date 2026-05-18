@@ -2,6 +2,7 @@ import { buildResponseSchema } from '../../shared/schema/buildResponseSchema'
 import type { ModePart } from '../../shared/schema/PromptPartDefinitions'
 import { AgentPrompt } from '../../shared/types/AgentPrompt'
 import { getSystemPromptFlags } from './getSystemPromptFlags'
+import { buildDesignSkillsSection } from './sections/design-skills-section'
 import { buildIntroPromptSection } from './sections/intro-section'
 import { buildRulesPromptSection } from './sections/rules-section'
 import { buildVisualDesignSection } from './sections/visual-design-section'
@@ -40,6 +41,8 @@ export function buildSystemPrompt(
 	if (modeType === 'visualize') {
 		lines.push(buildVisualDesignSection())
 	}
+
+	lines.push(buildDesignSkillsSection(prompt.designSkills))
 
 	if (withSchema) {
 		lines.push(buildSchemaPromptSection(modePart))

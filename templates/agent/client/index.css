@@ -1,27 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;700&display=swap');
 @import url('tldraw/tldraw.css');
+@import url('./tutor/tutor.css');
 
 * {
 	box-sizing: border-box;
 	overscroll-behavior: none;
 }
 
+html,
+body,
+#root {
+	height: 100%;
+	margin: 0;
+}
+
 body {
 	font-family: 'Inter', sans-serif;
 }
 
+/* The legacy `.tldraw-agent-container` and `.tldraw-canvas` styles are
+ * retained below for the in-rail ChatPanel; the new layout shell lives in
+ * `tutor/tutor.css`. */
 .tldraw-agent-container {
-	position: fixed;
-	inset: 0;
-	display: grid;
-	grid-template-columns: 1fr 350px;
-}
-
-@media (max-width: 768px) {
-	.tldraw-agent-container {
-		grid-template-columns: 1fr;
-		grid-template-rows: 1fr auto;
-	}
+	position: relative;
+	width: 100%;
+	height: 100%;
 }
 
 .tldraw-canvas {
@@ -44,10 +47,9 @@ body {
 .chat-panel {
 	display: flex;
 	flex-direction: column;
-	height: 100vh;
+	height: 100%;
 	font-size: 14px;
 	background-color: var(--tl-color-panel);
-	border-left: 1px solid var(--tl-color-low);
 	color: var(--tl-color-text-1);
 	font-family: 'Inter', sans-serif;
 	font-weight: 400;
@@ -57,8 +59,8 @@ body {
 
 @media (max-width: 768px) {
 	.chat-panel {
-		height: 50vh;
-		width: 100vw;
+		height: 100%;
+		width: 100%;
 	}
 }
 

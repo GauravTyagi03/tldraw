@@ -1,4 +1,13 @@
-import { Atom, atom, RecordsDiff, TLEditorSnapshot, TLRecord } from 'tldraw'
+import {
+	Atom,
+	Box,
+	atom,
+	compact,
+	RecordsDiff,
+	TLEditorSnapshot,
+	TLRecord,
+	TLShapeId,
+} from 'tldraw'
 import { LectureChunk } from '../../../shared/types/LectureChunk'
 import { LectureSequenceFile } from '../../../shared/types/LectureSequence'
 import type { TldrawAgent } from '../TldrawAgent'
@@ -26,6 +35,7 @@ export class AgentLectureManager extends BaseAgentManager {
 	/** Canvas snapshot before any lecture visuals were applied */
 	private baseSnapshot: TLEditorSnapshot | null = null
 	private chunkIdCounter = 0
+	private readonly chunkFocusInset = 90
 
 	constructor(agent: TldrawAgent) {
 		super(agent)
@@ -132,6 +142,50 @@ export class AgentLectureManager extends BaseAgentManager {
 		}
 
 		this.$currentChunkIndex.set(targetIndex)
+		this.zoomToChunk(targetIndex)
+	}
+
+	/**
+	 * Focuses the viewport on the visual area introduced or changed by a chunk.
+	 * Falls back to the whole current page if the chunk has no usable diff.
+	 */
+	private zoomToChunk(targetIndex: number): void {
+		const chunk = this.$chunks.get()[targetIndex]
+		if (!chunk?.diff) {
+			this.zoomToCurrentPage()
+			return
+		}
+
+		const shapeIds = new Set<TLShapeId>()
+
+		for (const record of Object.values(chunk.diff.added)) {
+			if (record.typeName === 'shape') shapeIds.add(record.id as TLShapeId)
+		}
+
+		for (const record of Object.values(chunk.diff.updated)) {
+			if (record[1].typeName === 'shape') shapeIds.add(record[1].id as TLShapeId)
+		}
+
+		const bounds = Box.Common(
+			compact([...shapeIds].map((shapeId) => this.agent.editor.getShapePageBounds(shapeId)))
+		)
+
+		if (!bounds) {
+			this.zoomToCurrentPage()
+			return
+		}
+
+		this.agent.editor.zoomToBounds(bounds.expandBy(this.chunkFocusInset), {
+			animation: { duration: 260 },
+		})
+	}
+
+	private zoomToCurrentPage(): void {
+		const bounds = this.agent.editor.getCurrentPageBounds()
+		if (!bounds) return
+		this.agent.editor.zoomToBounds(bounds.expandBy(this.chunkFocusInset), {
+			animation: { duration: 260 },
+		})
 	}
 
 	/**

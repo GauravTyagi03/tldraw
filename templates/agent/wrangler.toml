@@ -13,7 +13,10 @@ custom_domain = true
 
 # Set up the durable object used for each tldraw room
 [durable_objects]
-bindings = [{ name = "AGENT_DURABLE_OBJECT", class_name = "AgentDurableObject" }]
+bindings = [
+  { name = "AGENT_DURABLE_OBJECT", class_name = "AgentDurableObject" },
+  { name = "VOICE_SESSION", class_name = "VoiceSessionDurableObject" },
+]
 
 # Durable objects require migrations to create/modify/delete them
 [[migrations]]
@@ -23,3 +26,32 @@ new_classes = ["TldrawAiDurableObject"]
 [[migrations]]
 tag = "v2"
 renamed_classes = [{ from = "TldrawAiDurableObject", to = "AgentDurableObject" }]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["VoiceSessionDurableObject"]
+
+# Tutor platform storage (local dev uses Wrangler emulations; replace IDs on deploy)
+[[d1_databases]]
+binding = "TUTOR_DB"
+database_name = "tutor-platform"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "worker/migrations"
+
+[[r2_buckets]]
+binding = "TUTOR_DOCUMENTS"
+bucket_name = "tutor-documents"
+
+[[kv_namespaces]]
+binding = "TUTOR_KV"
+id = "00000000000000000000000000000001"
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "tutor-chunks"
+
+[vars]
+PROVIDER_MODE = "local"

@@ -17,12 +17,7 @@ Options:
    -o, --overwrite      Overwrite the target directory if it exists.
 
 Available starter kits:
- • basic                A minimal tldraw template with Vite, React, and TypeScript.
  • agent                An AI-powered agent.
- • branching-chat       A branching chat interface.
- • chat                 A chat UI with sketches and images as context for AI.
- • multiplayer          Real-time multiplayer for tldraw, built with Cloudflare Durable Objects.
- • workflow             Visual node-based builder for workflows.
 ```
 
 ## Development

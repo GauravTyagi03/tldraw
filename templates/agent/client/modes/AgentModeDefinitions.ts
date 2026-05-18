@@ -35,6 +35,7 @@ import { ContextItemsPartUtil } from '../parts/ContextItemsPartUtil'
 import { CurrentChunkPartUtil } from '../parts/CurrentChunkPartUtil'
 import { DataPartUtil } from '../parts/DataPartUtil'
 import { DebugPartUtil } from '../parts/DebugPartUtil'
+import { DesignSkillsPartUtil } from '../parts/DesignSkillsPartUtil'
 import { MessagesPartUtil } from '../parts/MessagesPartUtil'
 import { ModelNamePartUtil } from '../parts/ModelNamePartUtil'
 import { ModePartUtil } from '../parts/ModePartUtil'
@@ -98,6 +99,9 @@ export const AGENT_MODE_DEFINITIONS = [
 
 			// Debug (sends debug flags to worker)
 			DebugPartUtil.type,
+
+			// Design skills (sends selected design guidance to worker)
+			DesignSkillsPartUtil.type,
 
 			// Model
 			ModelNamePartUtil.type,
@@ -201,6 +205,7 @@ export const AGENT_MODE_DEFINITIONS = [
 		parts: [
 			ModePartUtil.type,
 			ModelNamePartUtil.type,
+			DesignSkillsPartUtil.type,
 			MessagesPartUtil.type,
 			CurrentChunkPartUtil.type,
 			ScreenshotPartUtil.type,
